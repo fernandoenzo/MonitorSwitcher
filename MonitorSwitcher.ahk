@@ -1,7 +1,7 @@
 /**
  * MonitorSwitcher v1.0
  * System tray utility to switch between monitors exclusively,
- * change resolution/refresh rate on Windows 11.
+ * change resolution/refresh rate, and toggle HDR on Windows 11.
  * See README.md for full documentation.
  * License: GPLv3+
  */
@@ -59,6 +59,11 @@ global DD_PRIMARY  := 0x00000004
 ; --- ChangeDisplaySettingsEx flags ---
 global CDS_UPDATEREGISTRY := 0x00000001
 
+; --- HDR (Advanced Color) ---
+global DC_INFO_GET_ADVANCED_COLOR := 9
+global DC_INFO_SET_ADVANCED_COLOR := 10
+global MONITOR_DATA_STORE := "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\MonitorDataStore"
+
 ; ==================================================================
 ;  GLOBAL STATE
 ; ==================================================================
@@ -77,7 +82,7 @@ global SelfChanging      := false  ; Suppresses WM_DISPLAYCHANGE during our own 
 
 /**
  * Returns an array of monitor objects, one per physically connected display.
- * Each object: {targetId, name, isActive, gdiName, w, h, freq}
+ * Each object: {targetId, name, devPath, luidLow, luidHigh, isActive, gdiName, w, h, freq}
  * Uses QDC_ACTIVE_PATHS for active info, QDC_ALL_PATHS for discovery.
  */
 GetAllMonitors() {
@@ -140,12 +145,15 @@ GetAllMonitors() {
                     tgtLuidL := NumGet(paths, off + PATH_TGT_LUID_LOW, "UInt")
                     tgtLuidH := NumGet(paths, off + PATH_TGT_LUID_HIGH, "UInt")
                     if !seenTargets.Has(tgtId) {
-                        fname := GetTargetFriendlyName(tgtLuidL, tgtLuidH, tgtId)
-                        if fname != "" {
+                        info := GetTargetInfo(tgtLuidL, tgtLuidH, tgtId)
+                        if info.name != "" {
                             seenTargets[tgtId] := true
                             mon := {}
                             mon.targetId := tgtId
-                            mon.name     := fname
+                            mon.name     := info.name
+                            mon.devPath  := info.devPath
+                            mon.luidLow  := tgtLuidL
+                            mon.luidHigh := tgtLuidH
                             mon.isActive := activeInfo.Has(tgtId)
                             if mon.isActive {
                                 ai := activeInfo[tgtId]
@@ -168,8 +176,8 @@ GetAllMonitors() {
     return monitors
 }
 
-/** Returns the friendly monitor name (e.g. "LG ULTRAGEAR") via DisplayConfigGetDeviceInfo type 2. */
-GetTargetFriendlyName(luidLow, luidHigh, targetId) {
+/** Returns {name, devPath} for a target via DisplayConfigGetDeviceInfo type 2. */
+GetTargetInfo(luidLow, luidHigh, targetId) {
     buf := Buffer(420, 0)
     NumPut("UInt", 2, buf, 0)
     NumPut("UInt", 420, buf, 4)
@@ -177,8 +185,8 @@ GetTargetFriendlyName(luidLow, luidHigh, targetId) {
     NumPut("UInt", luidHigh, buf, 12)
     NumPut("UInt", targetId, buf, 16)
     if 0 = DllCall("DisplayConfigGetDeviceInfo", "Ptr", buf, "Int")
-        return StrGet(buf.Ptr + 36, 64)
-    return ""
+        return {name: StrGet(buf.Ptr + 36, 64), devPath: StrGet(buf.Ptr + 164, 128)}
+    return {name: "", devPath: ""}
 }
 
 /** Returns the GDI device name (e.g. "\\.\DISPLAY1") via DisplayConfigGetDeviceInfo type 1. */
@@ -511,6 +519,106 @@ ApplyMode(gdiName, w, h, freq) {
 }
 
 ; ==================================================================
+;  HDR
+; ==================================================================
+
+/**
+ * Reads the real HDR state from the Windows registry (MonitorDataStore).
+ * The CCD API (type 9) can report incorrect values on some devices (e.g. dummy plugs),
+ * so the registry is the authoritative source for reading.
+ * Returns {found: bool, enabled: bool}.
+ */
+ReadHdrFromRegistry(devPath) {
+    parts := StrSplit(devPath, "#")
+    if parts.Length < 2
+        return {found: false, enabled: false}
+    prefix := parts[2]
+    try {
+        loop Reg, MONITOR_DATA_STORE, "K" {
+            if SubStr(A_LoopRegName, 1, StrLen(prefix)) = prefix {
+                try {
+                    val := RegRead(MONITOR_DATA_STORE "\" A_LoopRegName, "HDREnabled")
+                    return {found: true, enabled: (val = 1)}
+                }
+            }
+        }
+    }
+    return {found: false, enabled: false}
+}
+
+/**
+ * Checks if a monitor supports HDR via DisplayConfigGetDeviceInfo type 9.
+ * Returns true if supported, false otherwise.
+ */
+IsHdrSupported(luidLow, luidHigh, targetId) {
+    ci := Buffer(32, 0)
+    NumPut("UInt", DC_INFO_GET_ADVANCED_COLOR, ci, 0)
+    NumPut("UInt", 32, ci, 4)
+    NumPut("UInt", luidLow, ci, 8)
+    NumPut("UInt", luidHigh, ci, 12)
+    NumPut("UInt", targetId, ci, 16)
+    if 0 = DllCall("DisplayConfigGetDeviceInfo", "Ptr", ci, "Int")
+        return (NumGet(ci, 20, "UInt") & 0x1) != 0
+    return false
+}
+
+/**
+ * Toggles HDR on the active monitor.
+ * Reads state from the registry (authoritative), writes via CCD API type 10.
+ * All data queried fresh — nothing cached.
+ */
+ToggleHdr() {
+    monitors := GetAllMonitors()
+    activeMon := ""
+    for mon in monitors {
+        if mon.isActive {
+            activeMon := mon
+            break
+        }
+    }
+
+    if activeMon = "" {
+        ToolTip("No active monitor detected")
+        SetTimer(() => ToolTip(), -2500)
+        return
+    }
+
+    if !IsHdrSupported(activeMon.luidLow, activeMon.luidHigh, activeMon.targetId) {
+        ToolTip(activeMon.name ": HDR not supported")
+        SetTimer(() => ToolTip(), -2500)
+        return
+    }
+
+    state := ReadHdrFromRegistry(activeMon.devPath)
+    if !state.found {
+        ToolTip(activeMon.name ": HDR state not found in registry")
+        SetTimer(() => ToolTip(), -2500)
+        return
+    }
+
+    ; Write the opposite state via CCD API type 10
+    newState := !state.enabled
+    si := Buffer(24, 0)
+    NumPut("UInt", DC_INFO_SET_ADVANCED_COLOR, si, 0)
+    NumPut("UInt", 24, si, 4)
+    NumPut("UInt", activeMon.luidLow, si, 8)
+    NumPut("UInt", activeMon.luidHigh, si, 12)
+    NumPut("UInt", activeMon.targetId, si, 16)
+    NumPut("UInt", newState ? 1 : 0, si, 20)
+
+    ret := DllCall("DisplayConfigSetDeviceInfo", "Ptr", si, "Int")
+    if ret != 0 {
+        ToolTip("HDR toggle failed (error " ret ")")
+        SetTimer(() => ToolTip(), -2500)
+        return
+    }
+
+    label := newState ? "ON" : "OFF"
+    ToolTip(activeMon.name ": HDR " label)
+    SetTimer(() => ToolTip(), -2500)
+}
+
+; ==================================================================
 ;  TRAY MENU
 ; ==================================================================
 
@@ -588,6 +696,30 @@ BuildMenu() {
             freqMenu.Add(fl, ((fr, *) => ChangeFrequency(fr)).Bind(fc))
         }
         tray.Add("Refresh Rate  [" curMode.freq "Hz]", freqMenu)
+
+        ; --- HDR ---
+        activeMon := ""
+        for mon in monitors {
+            if mon.isActive {
+                activeMon := mon
+                break
+            }
+        }
+        if activeMon != "" {
+            if !IsHdrSupported(activeMon.luidLow, activeMon.luidHigh, activeMon.targetId) {
+                tray.Add("HDR  [not supported]", (*) => "")
+                tray.Disable("HDR  [not supported]")
+            } else {
+                hdrState := ReadHdrFromRegistry(activeMon.devPath)
+                if !hdrState.found {
+                    tray.Add("HDR  [unknown]", (*) => "")
+                    tray.Disable("HDR  [unknown]")
+                } else {
+                    hdrLabel := hdrState.enabled ? "HDR  [ON]" : "HDR  [OFF]"
+                    tray.Add(hdrLabel, (*) => ToggleHdr())
+                }
+            }
+        }
     }
 
     ; --- Actions ---
@@ -675,6 +807,8 @@ ExitHandler(*) {
     BuildMenu()
     A_TrayMenu.Show()
 }
+
+#^h:: ToggleHdr()
 
 ; ==================================================================
 ;  STARTUP
