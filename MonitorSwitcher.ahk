@@ -2,7 +2,6 @@
  * MonitorSwitcher v1.0
  * System tray utility to switch between monitors exclusively,
  * change resolution/refresh rate, and toggle HDR on Windows 11.
- * See README.md for full documentation.
  * License: GPLv3+
  */
 
@@ -838,4 +837,4 @@ OnDisplayChange(*) {
 OnMessage(0x007E, OnDisplayChange)
 
 TrayTip("MonitorSwitcher v1.0",
-        "Ctrl+Win+M = menu  |  Ctrl+Win+R = restore", 1)
+        "Ctrl+Win+M = menu  |  Ctrl+Win+R = restore  |  Ctrl+Win+H = HDR", 1)
