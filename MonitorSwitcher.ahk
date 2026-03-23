@@ -67,10 +67,7 @@ global MONITOR_DATA_STORE := "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDriv
 ;  GLOBAL STATE
 ; ==================================================================
 
-global OriginalPaths     := ""     ; Saved paths buffer before exclusive mode
-global OriginalModes     := ""     ; Saved modes buffer before exclusive mode
-global OriginalPathCount := 0      ; Number of paths in saved config
-global OriginalModeCount := 0      ; Number of modes in saved config
+global OriginalTopology  := []     ; {targetId, sourceId} pairs active before exclusive mode (primary first)
 global IsExclusive       := false  ; Whether we are in single-monitor mode
 global ActiveTargetId    := 0      ; targetId of the exclusive monitor
 global SelfChanging      := false  ; Suppresses WM_DISPLAYCHANGE during our own changes
@@ -231,28 +228,35 @@ GetCurrentMode(gdiName) {
 ;  EXCLUSIVE MODE — uses SetDisplayConfig
 ; ==================================================================
 
-/** Saves the current active display config (paths + modes) for later restoration. */
+/**
+ * Saves the active display topology (primary first).
+ * Stores {targetId, sourceId} per path to preserve extend vs duplicate layout.
+ * Paths and modes are queried fresh on restore — only topology is saved.
+ */
 SaveConfig() {
-    global OriginalPaths, OriginalModes, OriginalPathCount, OriginalModeCount
+    global OriginalTopology
+    OriginalTopology := []
     try {
         DllCall("GetDisplayConfigBufferSizes", "UInt", QDC_ACTIVE_PATHS,
                 "UInt*", &pc := 0, "UInt*", &mc := 0)
+        if pc = 0
+            return
         p := Buffer(SIZEOF_PATH * pc, 0)
         m := Buffer(SIZEOF_MODE * mc, 0)
         if 0 = DllCall("QueryDisplayConfig", "UInt", QDC_ACTIVE_PATHS,
                        "UInt*", &pc, "Ptr", p,
                        "UInt*", &mc, "Ptr", m, "Ptr", 0)
         {
-            OriginalPathCount := pc
-            OriginalModeCount := mc
-            OriginalPaths := Buffer(SIZEOF_PATH * pc, 0)
-            OriginalModes := Buffer(SIZEOF_MODE * mc, 0)
-            DllCall("msvcrt\memcpy", "Ptr", OriginalPaths, "Ptr", p, "UPtr", SIZEOF_PATH * pc)
-            DllCall("msvcrt\memcpy", "Ptr", OriginalModes, "Ptr", m, "UPtr", SIZEOF_MODE * mc)
-            return
+            off := 0
+            Loop pc {
+                OriginalTopology.Push({
+                    targetId: NumGet(p, off + PATH_TGT_ID, "UInt"),
+                    sourceId: NumGet(p, off + PATH_SRC_ID, "UInt")
+                })
+                off += SIZEOF_PATH
+            }
         }
     }
-    OriginalPathCount := 0
 }
 
 /**
@@ -328,7 +332,6 @@ SetExclusiveMonitor(targetId) {
 
     IsExclusive := true
     ActiveTargetId := targetId
-    BuildMenu()
 }
 
 /** Saves current active config to Windows' persistence database. */
@@ -350,21 +353,97 @@ SaveActiveConfigToDatabase() {
     }
 }
 
-/** Restores the display config saved before entering exclusive mode. */
+/**
+ * Restores the display topology saved before entering exclusive mode.
+ * Queries fresh paths from QDC_ALL_PATHS and activates paths matching
+ * the saved {targetId, sourceId} pairs — preserving extend vs duplicate layout.
+ * Primary monitor (first in OriginalTopology) goes first in the path array.
+ */
 RestoreOriginal() {
-    global OriginalPaths, OriginalModes, OriginalPathCount, OriginalModeCount
-    global IsExclusive, ActiveTargetId, SelfChanging
+    global OriginalTopology, IsExclusive, ActiveTargetId, SelfChanging
 
-    if !IsExclusive || OriginalPathCount = 0 {
+    if !IsExclusive || OriginalTopology.Length = 0 {
         MsgBox("Nothing to restore.", "MonitorSwitcher", "Icon!")
         return
     }
 
     SelfChanging := true
-    ret := DllCall("SetDisplayConfig",
-                   "UInt", OriginalPathCount, "Ptr", OriginalPaths,
-                   "UInt", OriginalModeCount, "Ptr", OriginalModes,
-                   "UInt", SDC_APPLY | SDC_USE_SUPPLIED | SDC_ALLOW_CHANGES, "Int")
+
+    ; Query fresh paths
+    DllCall("GetDisplayConfigBufferSizes", "UInt", QDC_ALL_PATHS,
+            "UInt*", &pc := 0, "UInt*", &mc := 0)
+    if pc = 0 {
+        SelfChanging := false
+        MsgBox("Restore failed: no display paths available.", "MonitorSwitcher", "Icon!")
+        return
+    }
+    paths := Buffer(SIZEOF_PATH * pc, 0)
+    modes := Buffer(SIZEOF_MODE * mc, 0)
+    if 0 != DllCall("QueryDisplayConfig", "UInt", QDC_ALL_PATHS,
+                    "UInt*", &pc, "Ptr", paths,
+                    "UInt*", &mc, "Ptr", modes, "Ptr", 0)
+    {
+        SelfChanging := false
+        MsgBox("Restore failed: could not query display config.", "MonitorSwitcher", "Icon!")
+        return
+    }
+
+    ; For each saved {targetId, sourceId}, find a matching path
+    ; Key: "targetId-sourceId" → offset in paths buffer
+    foundPaths := Map()
+    off := 0
+    Loop pc {
+        tgtId := NumGet(paths, off + PATH_TGT_ID, "UInt")
+        srcId := NumGet(paths, off + PATH_SRC_ID, "UInt")
+        key := tgtId "-" srcId
+        if !foundPaths.Has(key) {
+            for saved in OriginalTopology {
+                if (tgtId = saved.targetId && srcId = saved.sourceId) {
+                    foundPaths[key] := off
+                    break
+                }
+            }
+        }
+        off += SIZEOF_PATH
+    }
+
+    if foundPaths.Count = 0 {
+        SelfChanging := false
+        MsgBox("Restore failed: original monitors not found.", "MonitorSwitcher", "Icon!")
+        return
+    }
+
+    ; Build path array in the original order (primary first)
+    restoreBuf := Buffer(SIZEOF_PATH * foundPaths.Count, 0)
+    idx := 0
+    for saved in OriginalTopology {
+        key := saved.targetId "-" saved.sourceId
+        if foundPaths.Has(key) {
+            srcOff := foundPaths[key]
+            dstOff := SIZEOF_PATH * idx
+            DllCall("msvcrt\memcpy", "Ptr", restoreBuf.Ptr + dstOff,
+                    "Ptr", paths.Ptr + srcOff, "UPtr", SIZEOF_PATH)
+            NumPut("UInt", DC_PATH_ACTIVE, restoreBuf, dstOff + PATH_FLAGS)
+            NumPut("UInt", DC_MODE_IDX_INVALID, restoreBuf, dstOff + PATH_SRC_MODEIDX)
+            NumPut("UInt", DC_MODE_IDX_INVALID, restoreBuf, dstOff + PATH_TGT_MODEIDX)
+            idx++
+        }
+    }
+
+    ; Apply with three attempts
+    pathCount := idx
+    ret := DllCall("SetDisplayConfig", "UInt", pathCount, "Ptr", restoreBuf,
+                   "UInt", 0, "Ptr", 0,
+                   "UInt", SDC_APPLY | SDC_TOPOLOGY_SUPPLIED, "Int")
+    if ret != 0
+        ret := DllCall("SetDisplayConfig", "UInt", pathCount, "Ptr", restoreBuf,
+                       "UInt", 0, "Ptr", 0,
+                       "UInt", SDC_APPLY | SDC_USE_SUPPLIED, "Int")
+    if ret != 0
+        ret := DllCall("SetDisplayConfig", "UInt", pathCount, "Ptr", restoreBuf,
+                       "UInt", 0, "Ptr", 0,
+                       "UInt", SDC_APPLY | SDC_USE_SUPPLIED | SDC_ALLOW_CHANGES, "Int")
+
     SelfChanging := false
 
     if ret != 0
@@ -372,7 +451,6 @@ RestoreOriginal() {
 
     IsExclusive := false
     ActiveTargetId := 0
-    BuildMenu()
 }
 
 ; ==================================================================
@@ -562,47 +640,45 @@ IsHdrSupported(luidLow, luidHigh, targetId) {
 }
 
 /**
- * Toggles HDR on the active monitor.
- * Reads state from the registry (authoritative), writes via CCD API type 10.
- * All data queried fresh — nothing cached.
+ * Toggles HDR on a specific monitor identified by targetId.
+ * Queries fresh monitor data, reads state from registry, writes via CCD API type 10.
  */
-ToggleHdr() {
+ToggleHdr(targetId) {
     monitors := GetAllMonitors()
-    activeMon := ""
-    for mon in monitors {
-        if mon.isActive {
-            activeMon := mon
+    mon := ""
+    for m in monitors {
+        if m.targetId = targetId {
+            mon := m
             break
         }
     }
 
-    if activeMon = "" {
-        ToolTip("No active monitor detected")
+    if mon = "" {
+        ToolTip("Monitor not found")
         SetTimer(() => ToolTip(), -2500)
         return
     }
 
-    if !IsHdrSupported(activeMon.luidLow, activeMon.luidHigh, activeMon.targetId) {
-        ToolTip(activeMon.name ": HDR not supported")
+    if !IsHdrSupported(mon.luidLow, mon.luidHigh, mon.targetId) {
+        ToolTip(mon.name ": HDR not supported")
         SetTimer(() => ToolTip(), -2500)
         return
     }
 
-    state := ReadHdrFromRegistry(activeMon.devPath)
+    state := ReadHdrFromRegistry(mon.devPath)
     if !state.found {
-        ToolTip(activeMon.name ": HDR state not found in registry")
+        ToolTip(mon.name ": HDR state not found in registry")
         SetTimer(() => ToolTip(), -2500)
         return
     }
 
-    ; Write the opposite state via CCD API type 10
     newState := !state.enabled
     si := Buffer(24, 0)
     NumPut("UInt", DC_INFO_SET_ADVANCED_COLOR, si, 0)
     NumPut("UInt", 24, si, 4)
-    NumPut("UInt", activeMon.luidLow, si, 8)
-    NumPut("UInt", activeMon.luidHigh, si, 12)
-    NumPut("UInt", activeMon.targetId, si, 16)
+    NumPut("UInt", mon.luidLow, si, 8)
+    NumPut("UInt", mon.luidHigh, si, 12)
+    NumPut("UInt", mon.targetId, si, 16)
     NumPut("UInt", newState ? 1 : 0, si, 20)
 
     ret := DllCall("DisplayConfigSetDeviceInfo", "Ptr", si, "Int")
@@ -613,7 +689,29 @@ ToggleHdr() {
     }
 
     label := newState ? "ON" : "OFF"
-    ToolTip(activeMon.name ": HDR " label)
+    ToolTip(mon.name ": HDR " label)
+    SetTimer(() => ToolTip(), -2500)
+}
+
+/**
+ * Toggles HDR on the primary monitor. Used by the Ctrl+Win+H hotkey.
+ * Identifies the primary monitor by matching GDI name from GetActiveGdiName().
+ */
+ToggleHdrPrimary() {
+    gdiName := GetActiveGdiName()
+    if gdiName = "" {
+        ToolTip("No primary monitor detected")
+        SetTimer(() => ToolTip(), -2500)
+        return
+    }
+    monitors := GetAllMonitors()
+    for mon in monitors {
+        if (mon.isActive && mon.gdiName = gdiName) {
+            ToggleHdr(mon.targetId)
+            return
+        }
+    }
+    ToolTip("Primary monitor not found")
     SetTimer(() => ToolTip(), -2500)
 }
 
@@ -696,28 +794,29 @@ BuildMenu() {
         }
         tray.Add("Refresh Rate  [" curMode.freq "Hz]", freqMenu)
 
-        ; --- HDR ---
-        activeMon := ""
+        ; --- HDR (one line per active monitor) ---
+        anyHdrShown := false
         for mon in monitors {
-            if mon.isActive {
-                activeMon := mon
-                break
+            if !mon.isActive
+                continue
+            if !IsHdrSupported(mon.luidLow, mon.luidHigh, mon.targetId)
+                continue
+
+            anyHdrShown := true
+            hdrState := ReadHdrFromRegistry(mon.devPath)
+            if !hdrState.found {
+                hdrLabel := "HDR: " mon.name "  [unknown]"
+                tray.Add(hdrLabel, (*) => "")
+                tray.Disable(hdrLabel)
+            } else {
+                hdrLabel := "HDR: " mon.name "  [" (hdrState.enabled ? "ON" : "OFF") "]"
+                tid := mon.targetId
+                tray.Add(hdrLabel, ((t, *) => ToggleHdr(t)).Bind(tid))
             }
         }
-        if activeMon != "" {
-            if !IsHdrSupported(activeMon.luidLow, activeMon.luidHigh, activeMon.targetId) {
-                tray.Add("HDR  [not supported]", (*) => "")
-                tray.Disable("HDR  [not supported]")
-            } else {
-                hdrState := ReadHdrFromRegistry(activeMon.devPath)
-                if !hdrState.found {
-                    tray.Add("HDR  [unknown]", (*) => "")
-                    tray.Disable("HDR  [unknown]")
-                } else {
-                    hdrLabel := hdrState.enabled ? "HDR  [ON]" : "HDR  [OFF]"
-                    tray.Add(hdrLabel, (*) => ToggleHdr())
-                }
-            }
+        if !anyHdrShown {
+            tray.Add("HDR  [not supported]", (*) => "")
+            tray.Disable("HDR  [not supported]")
         }
     }
 
@@ -807,7 +906,7 @@ ExitHandler(*) {
     A_TrayMenu.Show()
 }
 
-#^h:: ToggleHdr()
+#^h:: ToggleHdrPrimary()
 
 ; ==================================================================
 ;  STARTUP

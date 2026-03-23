@@ -5,7 +5,7 @@
 MonitorSwitcher is a Windows 11 system tray utility written in AutoHotkey v2. It allows users to:
 - Switch between monitors exclusively (turn off all others)
 - Change resolution and refresh rate
-- Toggle HDR on the active monitor
+- Toggle HDR per active monitor (via menu) or primary monitor (via hotkey)
 - Restore original display configuration
 
 Single-file application: `MonitorSwitcher.ahk`
@@ -77,8 +77,7 @@ global QDC_ALL_PATHS := 1
 
 **Global Variables** - PascalCase with global prefix:
 ```ahk
-global OriginalPaths     := ""
-global OriginalPathCount := 0
+global OriginalTopology  := []
 global IsExclusive       := false
 ```
 
@@ -87,7 +86,8 @@ global IsExclusive       := false
 GetAllMonitors()
 GetTargetInfo(luidLow, luidHigh, targetId)
 SetExclusiveMonitor(targetId)
-ToggleHdr()
+ToggleHdr(targetId)
+ToggleHdrPrimary()
 ```
 
 **Local Variables** - camelCase:
@@ -254,16 +254,22 @@ AHK v2 is dynamically typed. Common types:
 - DISPLAY_DEVICEW (840 bytes)
 
 ### State Management
-- Global state tracks: original config, exclusive mode, active target
+- Global state tracks: `OriginalTopology` (array of {targetId, sourceId}), `IsExclusive`, `ActiveTargetId`
 - `SelfChanging` flag prevents WM_DISPLAYCHANGE handler recursion
 - Menu rebuilt on every display change event
 
 ### HDR Implementation
 - `ReadHdrFromRegistry(devPath)` - Reads HDR state from Windows registry (authoritative source)
 - `IsHdrSupported(luidLow, luidHigh, targetId)` - Checks if monitor supports HDR via CCD API type 9
-- `ToggleHdr()` - Toggles HDR on active monitor via CCD API type 10
+- `ToggleHdr(targetId)` - Toggles HDR on a specific monitor via CCD API type 10
+- `ToggleHdrPrimary()` - Toggles HDR on the primary monitor (used byCtrl+Win+H hotkey)
 
 The CCD API (`DisplayConfigGetDeviceInfo` type 9) can report incorrect HDR state on some devices (e.g., dummy plugs), so the registry is used as the authoritative source for reading HDR state. Writing HDR state uses `DisplayConfigSetDeviceInfo` type 10.
+
+### Monitor Topology Preservation
+- `SaveConfig()` stores `{targetId, sourceId}` pairs (not full paths/modes)
+- `RestoreOriginal()` queries fresh paths from `QDC_ALL_PATHS` and matches saved topology
+- Preserves extend vs duplicate layout and primary monitor order
 
 ### Key Constants
 - `DC_INFO_GET_ADVANCED_COLOR := 9` - CCD API type for querying HDR support
