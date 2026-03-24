@@ -1,5 +1,5 @@
 /**
- * MonitorSwitcher v1.0
+ * MonitorSwitcher
  * System tray utility to switch between monitors exclusively,
  * change resolution/refresh rate, and toggle HDR on Windows 11.
  * License: GPLv3+
@@ -268,9 +268,6 @@ SaveConfig() {
  */
 SetExclusiveMonitor(targetId) {
     global IsExclusive, ActiveTargetId, SelfChanging
-
-    if !IsExclusive
-        SaveConfig()
 
     SelfChanging := true
 
@@ -729,25 +726,27 @@ BuildMenu() {
     tray := A_TrayMenu
     tray.Delete()
 
-    tray.Add("MonitorSwitcher v1.0", (*) => "")
-    tray.Disable("MonitorSwitcher v1.0")
+    tray.Add("MonitorSwitcher", (*) => "")
+    tray.Disable("MonitorSwitcher")
     tray.Add()
 
     ; --- Monitors ---
     monitors := GetAllMonitors()
 
-    ; If we think we're in exclusive mode, verify the target is still active.
-    ; If the user switched monitors externally (e.g. via Windows Settings),
-    ; our state is stale — reset it.
+    ; If we think we're in exclusive mode, verify:
+    ;   1) Our target is still active
+    ;   2) It's the ONLY active monitor
+    ; If the user changed topology externally, our state is stale — reset it.
     if IsExclusive {
-        exclusiveStillActive := false
+        exclusiveStillValid := false
+        activeCount := 0
         for mon in monitors {
-            if (mon.targetId = ActiveTargetId && mon.isActive) {
-                exclusiveStillActive := true
-                break
-            }
+            if mon.isActive
+                activeCount++
+            if (mon.targetId = ActiveTargetId && mon.isActive)
+                exclusiveStillValid := true
         }
-        if !exclusiveStillActive {
+        if (!exclusiveStillValid || activeCount != 1) {
             IsExclusive := false
             ActiveTargetId := 0
         }
@@ -926,6 +925,7 @@ TrayClick(wParam, lParam, msg, hwnd) {
 }
 
 TraySetIcon("shell32.dll", 16)
+SaveConfig()  ; Snapshot initial topology for Restore
 BuildMenu()
 
 OnDisplayChange(*) {
@@ -935,5 +935,5 @@ OnDisplayChange(*) {
 }
 OnMessage(0x007E, OnDisplayChange)
 
-TrayTip("MonitorSwitcher v1.0",
+TrayTip("MonitorSwitcher",
         "Ctrl+Win+M = menu  |  Ctrl+Win+R = restore  |  Ctrl+Win+H = HDR", 1)
