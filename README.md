@@ -27,7 +27,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 3. Right-click the tray icon to access all features:
 
 ```
-MonitorSwitcher v1.0
+MonitorSwitcher
 ────────────────────────────
  *  LG ULTRAGEAR  |  1920x1080 @ 144Hz
     LG Dummy Plug  (off)
@@ -41,11 +41,11 @@ Restore original config
 Exit
 ```
 
-- **Monitor list** — Click a monitor to activate it exclusively (all others are turned off). The active monitor is marked with `*`, or `>>` when in exclusive mode.
+- **Monitor list** — Click a monitor to activate it exclusively (all others are turned off). The active monitor is marked with `*`, or `>>` when it is the only active monitor.
 - **Resolution** — Submenu with all available resolutions, sorted largest first. The active one is marked with `>>`.
 - **Refresh Rate** — Submenu with available rates for the current resolution.
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
-- **Restore** — Returns to the exact display layout you had before entering exclusive mode.
+- **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
 
 ### Global Hotkeys
 
@@ -57,7 +57,7 @@ Exit
 
 These hotkeys are essential when working with a single monitor — the tray icon may not be visible on a secondary screen, but the hotkeys always work.
 
-You can change the hotkeys by editing the script. For example, to use `Ctrl+Alt+R` instead of `Ctrl+Win+R`:
+You can change the hotkeys by editing the source. In the AHK version, for example, to use `Ctrl+Alt+R` instead of `Ctrl+Win+R`:
 
 ```ahk
 ; Change this:
@@ -67,6 +67,8 @@ You can change the hotkeys by editing the script. For example, to use `Ctrl+Alt+
 ```
 
 See the [AutoHotkey v2 Hotkey documentation](https://www.autohotkey.com/docs/v2/Hotkeys.htm) for all available modifiers.
+
+In the C version, modify the `RegisterHotKey` calls in `wWinMain` and recompile.
 
 ## How It Works
 
@@ -89,7 +91,8 @@ No external dependencies, no admin privileges required, no PowerShell, no regist
 Download the latest release from the [Releases](../../releases) page:
 
 - **`MonitorSwitcher.exe`** — Pre-compiled, ready to run. No dependencies needed.
-- **`MonitorSwitcher.ahk`** — Source code. Requires [AutoHotkey v2](https://www.autohotkey.com/) if you want to run or modify it directly.
+- **`MonitorSwitcher.ahk`** — AutoHotkey v2 source. Requires [AutoHotkey v2](https://www.autohotkey.com/) to run directly.
+- **`MonitorSwitcher.c`** — Native Win32 C source. Cross-compiles from Linux with MinGW-w64 (`make`).
 
 ## License
 

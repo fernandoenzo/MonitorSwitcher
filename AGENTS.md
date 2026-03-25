@@ -50,7 +50,7 @@ No automated test framework. Manual testing required:
 4. Test resolution and refresh rate changes via submenus
 5. Test hotkeys: Ctrl+Win+M (menu), Ctrl+Win+R (restore), Ctrl+Win+H (HDR toggle)
 6. Test HDR toggle on HDR-capable and non-HDR monitors
-7. Test exit behavior: confirm restore prompt when in exclusive mode
+7. Test exit behavior: confirm restore prompt when topology differs from startup
 
 ## Key Win32 APIs Used
 
@@ -79,8 +79,8 @@ No automated test framework. Manual testing required:
 ## Architecture
 
 ### State Management
-- `g_originalTopology[]` — array of `{targetId, sourceId}` pairs saved at startup (primary first)
-- `g_isExclusive` / `g_activeTargetId` — exclusive mode tracking
+- `g_originalTopology[]` — array of `{targetId, sourceId}` pairs saved once at startup (primary first), never overwritten
+- `IsTopologyChanged()` — queries current active paths and compares against `g_originalTopology` to detect any topology change, regardless of origin (MonitorSwitcher, Windows Settings, etc.)
 - `g_selfChanging` — reentrancy guard suppressing WM_DISPLAYCHANGE during our own changes
 - Menu lookup tables (`g_menuMonitorIds`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdrIds`) map menu item IDs to action parameters
 
@@ -128,7 +128,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 
 ## Important Technical Details
 
-- The `ValidateExclusiveState()` function checks whether the exclusive state is still valid (target still active and the only active monitor). Called both on `WM_DISPLAYCHANGE` (debounced) and before building the context menu.
+- `IsTopologyChanged()` queries the current active paths and compares them against `g_originalTopology` to detect any topology change. Used to enable/disable "Restore original config" in the menu, in the exit handler, and for tooltip state display.
 - `g_pathBuf` and `g_modeBuf` are shared global static arrays for `QueryDisplayConfig` results. They are never used recursively — each call overwrites the previous contents.
 - The `Sleep(2000)` in `ExitHandler` is the only blocking sleep in the program. It is acceptable because the app is about to terminate.
 - `WM_DISPLAYCHANGE` is debounced with a 1-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
