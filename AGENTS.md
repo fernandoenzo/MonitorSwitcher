@@ -26,11 +26,11 @@ Both the `.ahk` and `.c` implementations are functionally equivalent and maintai
 
 ## Building
 
-Requires `mingw-w64` for cross-compilation from Linux:
+Requires `mingw-w64` and `build-essential` for cross-compilation from Linux:
 
 ```bash
-# Install (Debian/Ubuntu)
-sudo apt install mingw-w64
+# Install dependencies (Debian/Ubuntu)
+sudo apt install build-essential mingw-w64
 
 # Build
 make
