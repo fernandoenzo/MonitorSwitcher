@@ -1,281 +1,140 @@
-# MonitorSwitcher - AGENTS.md
+# AGENTS.md
 
 ## Project Overview
 
-MonitorSwitcher is a Windows 11 system tray utility written in AutoHotkey v2. It allows users to:
+**MonitorSwitcher** is a Windows 11 system tray utility that allows users to:
 - Switch between monitors exclusively (turn off all others)
 - Change resolution and refresh rate
 - Toggle HDR per active monitor (via menu) or primary monitor (via hotkey)
 - Restore original display configuration
 
-Single-file application: `MonitorSwitcher.ahk`
+## File Structure
 
-## Commands
-
-### Running
-```bash
-# Run the script (requires AutoHotkey v2.0+ installed)
-AutoHotkey64.exe MonitorSwitcher.ahk
-# Or double-click the .ahk file in Windows Explorer
+```
+MonitorSwitcher.ahk       # Original AutoHotkey v2 implementation (939 lines)
+MonitorSwitcher.c         # Native Win32 C implementation (~1640 lines)
+MonitorSwitcher.rc        # Windows resource script (embeds the .ico into the .exe)
+MonitorSwitcher.ico       # Application icon
+Makefile                  # Cross-compilation with MinGW-w64 from Linux
+README.md                 # Full documentation
+AGENTS.md                 # AI agent coding guidelines
+LICENSE                   # GPLv3
+.gitignore                # Ignores build artifacts (*.exe, *.o, *.res)
 ```
 
-### Building (Optional)
-AutoHotkey scripts can be compiled to standalone executables:
+Both the `.ahk` and `.c` implementations are functionally equivalent and maintained in parallel.
+
+## Building
+
+Requires `mingw-w64` for cross-compilation from Linux:
+
 ```bash
-Ahk2Exe.exe /in "MonitorSwitcher.ahk" /out "MonitorSwitcher.exe"
+# Install (Debian/Ubuntu)
+sudo apt install mingw-w64
+
+# Build
+make
+
+# Clean
+make clean
 ```
 
-### Testing
+This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon embedded as a resource. The Makefile links against `-lshell32 -luser32 -lkernel32 -ladvapi32` (advapi32 is needed for registry APIs used by HDR).
+
+## Testing
+
 No automated test framework. Manual testing required:
-1. Run the script on Windows 11
-2. Right-click tray icon to test menu functionality
-3. Test monitor switching, resolution/refresh rate changes
-4. Test hotkeys: Ctrl+Win+M (menu), Ctrl+Win+R (restore), Ctrl+Win+H (HDR toggle)
-5. Test HDR toggle on HDR-capable and non-HDR monitors
+1. Run `MonitorSwitcher.exe` on Windows 11
+2. Right-click (or left-click) tray icon to test menu functionality
+3. Test monitor switching with confirmation dialog
+4. Test resolution and refresh rate changes via submenus
+5. Test hotkeys: Ctrl+Win+M (menu), Ctrl+Win+R (restore), Ctrl+Win+H (HDR toggle)
+6. Test HDR toggle on HDR-capable and non-HDR monitors
+7. Test exit behavior: confirm restore prompt when in exclusive mode
 
-### Linting
-No formal linter for AHK. Review code manually for:
-- Correct DllCall signatures
-- Proper Buffer sizes for Win32 structs
-- Valid AHK v2 syntax (see: https://www.autohotkey.com/docs/v2/)
+## Key Win32 APIs Used
 
-## Code Style Guidelines
+### Display Configuration (CCD)
+- `GetDisplayConfigBufferSizes` — get required buffer sizes for QueryDisplayConfig
+- `QueryDisplayConfig` — enumerate display paths and modes (QDC_ONLY_ACTIVE_PATHS, QDC_ALL_PATHS)
+- `SetDisplayConfig` — apply display topology changes (three-attempt strategy)
+- `DisplayConfigGetDeviceInfo` — get target names (type 2), source GDI names (type 1), HDR support (type 9)
+- `DisplayConfigSetDeviceInfo` — toggle HDR on/off (type 10)
 
-### File Structure
-```
-/**
- * MonitorSwitcher vX.Y
- * Brief description
- * License: GPLv3+
- */
+### Display Enumeration
+- `EnumDisplaySettingsExW` — enumerate display modes / get current mode
+- `EnumDisplayDevicesW` — find primary display by iterating all devices
+- `ChangeDisplaySettingsExW` — apply resolution/refresh rate changes
 
-#Requires AutoHotkey v2.0
-#SingleInstance Force
-Persistent
+### Registry (HDR)
+- `RegOpenKeyExW` / `RegEnumKeyExW` / `RegQueryValueExW` / `RegCloseKey` — read HDR state from `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\MonitorDataStore`
 
-; ==================================================================
-;  CONSTANTS
-; ==================================================================
+### System Tray and UI
+- `Shell_NotifyIconW` — system tray icon, tooltip, and balloon notifications
+- `CreatePopupMenu` / `AppendMenuW` / `TrackPopupMenu` / `DestroyMenu` — context menus with submenus
+- `RegisterHotKey` / `UnregisterHotKey` — global hotkeys (Ctrl+Win+R/M/H)
+- `CreateMutexW` — enforces single instance
+- `MessageBoxW` — confirmation dialogs and error messages
 
-; ==================================================================
-;  GLOBAL STATE
-; ==================================================================
-
-; ==================================================================
-;  SECTION NAME
-; ==================================================================
-```
-
-### Naming Conventions
-
-**Constants** - UPPER_CASE with global prefix:
-```ahk
-global SIZEOF_DD    := 840
-global OFF_DD_NAME  := 4       ; Inline comment explaining purpose
-global QDC_ALL_PATHS := 1
-```
-
-**Global Variables** - PascalCase with global prefix:
-```ahk
-global OriginalTopology  := []
-global IsExclusive       := false
-```
-
-**Functions** - PascalCase:
-```ahk
-GetAllMonitors()
-GetTargetInfo(luidLow, luidHigh, targetId)
-SetExclusiveMonitor(targetId)
-ToggleHdr(targetId)
-ToggleHdrPrimary()
-```
-
-**Local Variables** - camelCase:
-```ahk
-monitors := []
-seenTargets := Map()
-gdiName := GetActiveGdiName()
-```
-
-### Comments
-
-**Block comments** for function documentation (JSDoc-style):
-```ahk
-/**
- * Brief description of function.
- * More details if needed.
- * @param paramName - description (optional format)
- * @returns description
- */
-```
-
-**Section headers** use equal signs:
-```ahk
-; ==================================================================
-;  SECTION NAME
-; ==================================================================
-```
-
-**Inline comments** explain non-obvious logic:
-```ahk
-if ret != 0
-    MsgBox("Error code " ret, "Title", "Icon!")
-; SDC_ALLOW_CHANGES causes 60Hz fallback - use as last resort
-```
-
-### Imports
-
-No external dependencies. Uses only:
-- AutoHotkey v2 built-in functions
-- Windows API via DllCall
-
-### Windows API (DllCall) Patterns
-
-**Buffer allocation for structs:**
-```ahk
-global SIZEOF_PATH := 72
-paths := Buffer(SIZEOF_PATH * count, 0)
-```
-
-**NumPut for struct fields:**
-```ahk
-NumPut("UInt", value, buffer, OFFSET_CONSTANT)
-NumPut("UShort", SIZEOF_DM, dm, OFF_DM_SIZE)
-```
-
-**NumGet for reading struct fields:**
-```ahk
-tgtId := NumGet(ap, off + PATH_TGT_ID, "UInt")
-```
-
-**DllCall signature format:**
-```ahk
-DllCall("FunctionName", "Type1", param1, "Type2", param2, "Int")
-DllCall("User32\EnumDisplaySettingsExW", "Str", gdiName, "Int", modeIdx, "Ptr", dm, "UInt", 0, "Int")
-```
-
-**String handling with Buffer:**
-```ahk
-return StrGet(buf.Ptr + offset, charCount)
-```
-
-### Error Handling
-
-**Try blocks for API calls:**
-```ahk
-try {
-    DllCall("GetDisplayConfigBufferSizes", "UInt", QDC_ACTIVE_PATHS,
-            "UInt*", &apc := 0, "UInt*", &amc := 0)
-    ; ...
-}
-```
-
-**User-facing errors via MsgBox:**
-```ahk
-if ret != 0
-    MsgBox("Error description (code " ret ")", "MonitorSwitcher", "Icon!")
-```
-
-**Return error codes from functions:**
-```ahk
-if !DllCall("Function", ...)
-    return ""
-return result
-```
-
-### AHK v2 Specific Patterns
-
-**Global variable declaration required:**
-```ahk
-global OriginalPaths     := ""
-global OriginalPathCount := 0
-global IsExclusive       := false  ; must use assignment with :=
-```
-
-**Fat arrow functions for hotkeys:**
-```ahk
-#^r:: {
-    ; hotkey code
-}
-```
-
-**Menu callbacks with closures (bind pattern):**
-```ahk
-tray.Add(label, ((t, *) => ConfirmSwitch(t)).Bind(tid))
-```
-
-**Loop syntax:**
-```ahk
-Loop count {    ; with count
-    ; body
-}
-Loop {           ; infinite
-    if condition
-        break
-}
-```
-
-**Map and Array usage:**
-```ahk
-map := Map()
-map[key] := value
-if map.Has(key) { ... }
-
-arr := []
-arr.Push(item)
-length := arr.Length
-```
-
-### Types
-
-AHK v2 is dynamically typed. Common types:
-- `Str` - strings
-- `Int`, `UInt` - 32-bit integers
-- `Ptr`, `UPtr` - pointer-sized
-- `UShort` - 16-bit unsigned
-- `Float`, `Double` - floating point
-- `Buffer` - memory buffer for structs
-
-## Architecture Notes
-
-### Windows APIs Used
-- `SetDisplayConfig` - Activate/deactivate monitors (topology)
-- `ChangeDisplaySettingsExW` - Change resolution/refresh rate
-- `QueryDisplayConfig` - Enumerate displays
-- `DisplayConfigGetDeviceInfo` - Get friendly names, device paths, and HDR support info
-- `DisplayConfigSetDeviceInfo` - Toggle HDR on/off (type 10)
-- `EnumDisplaySettingsExW` - Get available modes
-- `EnumDisplayDevicesW` - Get primary display info
-
-### Key Data Structures
-- DISPLAYCONFIG_PATH_INFO (72 bytes)
-- DISPLAYCONFIG_MODE_INFO (64 bytes)
-- DEVMODEW (220+ bytes)
-- DISPLAY_DEVICEW (840 bytes)
+## Architecture
 
 ### State Management
-- Global state tracks: `OriginalTopology` (array of {targetId, sourceId}), `IsExclusive`, `ActiveTargetId`
-- `SelfChanging` flag prevents WM_DISPLAYCHANGE handler recursion
-- Menu rebuilt on every display change event
+- `g_originalTopology[]` — array of `{targetId, sourceId}` pairs saved at startup (primary first)
+- `g_isExclusive` / `g_activeTargetId` — exclusive mode tracking
+- `g_selfChanging` — reentrancy guard suppressing WM_DISPLAYCHANGE during our own changes
+- Menu lookup tables (`g_menuMonitorIds`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdrIds`) map menu item IDs to action parameters
+
+### Menu Callback Pattern (C)
+AHK uses closures with `.Bind()`. The C port uses WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
+- `IDM_MONITOR_BASE` (1000+) — monitor targetIds
+- `IDM_RES_BASE` (2000+) — resolution entries
+- `IDM_FREQ_BASE` (3000+) — frequency values
+- `IDM_HDR_BASE` (4000+) — HDR monitor targetIds
+
+### Monitor Enumeration (Two-Phase)
+1. **Phase 1:** `QDC_ONLY_ACTIVE_PATHS` — get current GDI name, resolution, frequency for active targets
+2. **Phase 2:** `QDC_ALL_PATHS` — discover all connected targets (including inactive) with friendly names and device paths
+
+### Exclusive Mode (Three-Attempt Strategy)
+Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply topology:
+1. `SDC_APPLY | SDC_TOPOLOGY_SUPPLIED` — best: reads modes from Windows' persistence database
+2. `SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG` — strict, no changes allowed
+3. `SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES` — last resort (may cause 60Hz fallback)
 
 ### HDR Implementation
-- `ReadHdrFromRegistry(devPath)` - Reads HDR state from Windows registry (authoritative source)
-- `IsHdrSupported(luidLow, luidHigh, targetId)` - Checks if monitor supports HDR via CCD API type 9
-- `ToggleHdr(targetId)` - Toggles HDR on a specific monitor via CCD API type 10
-- `ToggleHdrPrimary()` - Toggles HDR on the primary monitor (used byCtrl+Win+H hotkey)
+- **Reading state:** Registry (`MonitorDataStore\<prefix>\HDREnabled`) is the authoritative source. The CCD API type 9 can lie on dummy plugs.
+- **Checking support:** CCD API type 9 (`DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO.advancedColorSupported`)
+- **Writing state:** CCD API type 10 (`DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE`)
 
-The CCD API (`DisplayConfigGetDeviceInfo` type 9) can report incorrect HDR state on some devices (e.g., dummy plugs), so the registry is used as the authoritative source for reading HDR state. Writing HDR state uses `DisplayConfigSetDeviceInfo` type 10.
+### Resolution/Refresh Rate
+- `ApplyMode` finds the exact driver-enumerated `DEVMODEW` matching (w, h, freq) — it never constructs a DEVMODE from scratch. This preserves driver-specific signal parameters (color depth, timing, etc.).
+- `ChangeResolution` tries to preserve the current refresh rate; falls back to highest available.
+- Functions always get the GDI name fresh via `GetActiveGdiName()` — never from cached/closure values.
 
-### Monitor Topology Preservation
-- `SaveConfig()` stores `{targetId, sourceId}` pairs (not full paths/modes)
-- `RestoreOriginal()` queries fresh paths from `QDC_ALL_PATHS` and matches saved topology
-- Preserves extend vs duplicate layout and primary monitor order
+## Conventions
 
-### Key Constants
-- `DC_INFO_GET_ADVANCED_COLOR := 9` - CCD API type for querying HDR support
-- `DC_INFO_SET_ADVANCED_COLOR := 10` - CCD API type for setting HDR state
-- `MONITOR_DATA_STORE` - Registry path for monitor HDR data
-- `CDS_UPDATEREGISTRY := 0x00000001` - Flag for `ChangeDisplaySettingsExW`
+- All code comments and documentation must be written in **English**.
+- The C code uses the Win32 Unicode API exclusively (all `W`-suffixed functions, `WCHAR` strings with `L"..."` prefix). The `-municode` compiler flag handles the `UNICODE` / `_UNICODE` defines.
+- The project is intentionally single-file (one `.c` file). Do not split it into multiple source files.
+- Comments use `/* C-style */` only (no `//`). Every function has a block comment describing its purpose and any non-obvious behavior.
+- Section headers use Unicode box-drawing characters: `/* ─── Section Name ──── */`
+- Constants: `UPPER_SNAKE_CASE` via `#define`, grouped by category with prefixes (`TIMER_`, `IDM_`, `HOTKEY_`, `MAX_`).
+- Globals: `static g_camelCase`, all initialized to `NULL`/`0`/`FALSE`.
+- Functions: `static PascalCase(void)`, all internal linkage.
+- Local variables: `camelCase`.
+- K&R brace style, 4-space indentation.
+- No heap allocation — all stack locals and static globals.
+- All git commits must be **signed** (`git commit -S`).
+
+## Important Technical Details
+
+- The `ValidateExclusiveState()` function checks whether the exclusive state is still valid (target still active and the only active monitor). Called both on `WM_DISPLAYCHANGE` (debounced) and before building the context menu.
+- `g_pathBuf` and `g_modeBuf` are shared global static arrays for `QueryDisplayConfig` results. They are never used recursively — each call overwrites the previous contents.
+- The `Sleep(2000)` in `ExitHandler` is the only blocking sleep in the program. It is acceptable because the app is about to terminate.
+- `WM_DISPLAYCHANGE` is debounced with a 1-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
+- Balloon notifications via `Shell_NotifyIconW` + `NIF_INFO` integrate automatically with the Windows 10/11 notification center.
+- The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry`.
+- `WINVER` and `_WIN32_WINNT` must be defined as `0x0601` (Windows 7+) before `#include <windows.h>` for the DISPLAYCONFIG types to be available in MinGW-w64 headers.
 
 ## License
 
