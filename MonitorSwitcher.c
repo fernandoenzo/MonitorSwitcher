@@ -4,10 +4,6 @@
  * System tray utility to switch between monitors exclusively,
  * change resolution/refresh rate, and toggle HDR on Windows 11.
  *
- * Single-file C port of MonitorSwitcher.ahk.
- * Cross-compiled from Linux with MinGW-w64 (see Makefile).
- *
- * See README.md for full documentation.
  * License: GPLv3+
  */
 
@@ -96,10 +92,6 @@ static NOTIFYICONDATAW  g_nid;
 static TopologyEntry    g_originalTopology[MAX_TOPOLOGY];
 static int              g_originalTopologyCount = 0;
 
-/* Exclusive mode state */
-static BOOL             g_isExclusive          = FALSE;
-static UINT32           g_activeTargetId       = 0;
-
 /* Reentrancy guard — suppresses WM_DISPLAYCHANGE during our own changes */
 static BOOL             g_selfChanging         = FALSE;
 
@@ -129,10 +121,10 @@ static BOOL GetCurrentMode(const WCHAR *gdiName,
 
 /* Exclusive mode */
 static void SaveConfig(void);
+static BOOL IsTopologyChanged(void);
 static void SetExclusiveMonitor(UINT32 targetId);
 static void SaveActiveConfigToDatabase(void);
 static void RestoreOriginal(void);
-static void ValidateExclusiveState(void);
 
 /* Resolution / refresh rate */
 static int  GetAvailableResolutions(const WCHAR *gdiName,
@@ -256,11 +248,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             /*
              * One-shot timer: fired 1000ms after WM_DISPLAYCHANGE.
              * Gives Windows time to settle after topology changes.
-             * Validates exclusive state in case user changed topology
-             * externally (e.g. via Windows display settings).
              */
             KillTimer(hwnd, TIMER_REBUILD);
-            ValidateExclusiveState();
             UpdateTooltip();
             break;
         }
@@ -277,7 +266,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
     case WM_HOTKEY:
         switch (wParam) {
         case HOTKEY_RESTORE:
-            if (g_isExclusive) {
+            if (IsTopologyChanged()) {
                 RestoreOriginal();
                 ShowBalloon(L"MonitorSwitcher", L"Configuration restored");
             } else {
@@ -542,35 +531,51 @@ static BOOL GetCurrentMode(const WCHAR *gdiName,
 /* ─── Exclusive Mode ────────────────────────────────────────────────── */
 
 /*
- * Validates that exclusive mode is still genuinely in effect.
- * If the user changed topology externally (e.g. via Windows display
- * settings), our saved exclusive state becomes stale — reset it.
- * Checks two conditions:
- *   1) The active target is still active
- *   2) It is the ONLY active monitor
+ * Compares the current active topology with the saved original topology.
+ * Returns TRUE if they differ (meaning the user or another app changed
+ * the display configuration), FALSE if they match.
  */
-static void ValidateExclusiveState(void)
+static BOOL IsTopologyChanged(void)
 {
-    if (!g_isExclusive)
-        return;
+    if (g_originalTopologyCount == 0)
+        return FALSE;
 
-    MonitorInfo monitors[MAX_MONITORS];
-    int monCount = GetAllMonitors(monitors, MAX_MONITORS);
+    UINT32 pc = 0, mc = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pc, &mc)
+            != ERROR_SUCCESS || pc == 0)
+        return FALSE;
+    if (pc > MAX_PATHS) pc = MAX_PATHS;
+    if (mc > MAX_MODES) mc = MAX_MODES;
+    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
+    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
 
-    BOOL targetStillActive = FALSE;
-    int activeCount = 0;
-    int i;
-    for (i = 0; i < monCount; i++) {
-        if (monitors[i].isActive) activeCount++;
-        if (monitors[i].targetId == g_activeTargetId
-            && monitors[i].isActive)
-            targetStillActive = TRUE;
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
+            &pc, g_pathBuf, &mc, g_modeBuf, NULL) != ERROR_SUCCESS)
+        return FALSE;
+
+    /* Different number of active paths = topology changed */
+    if ((int)pc != g_originalTopologyCount)
+        return TRUE;
+
+    /* Check if all {targetId, sourceId} pairs match */
+    UINT32 i;
+    for (i = 0; i < pc; i++) {
+        BOOL found = FALSE;
+        int j;
+        for (j = 0; j < g_originalTopologyCount; j++) {
+            if (g_pathBuf[i].targetInfo.id
+                    == g_originalTopology[j].targetId
+                && g_pathBuf[i].sourceInfo.id
+                    == g_originalTopology[j].sourceId) {
+                found = TRUE;
+                break;
+            }
+        }
+        if (!found)
+            return TRUE;
     }
 
-    if (!targetStillActive || activeCount != 1) {
-        g_isExclusive = FALSE;
-        g_activeTargetId = 0;
-    }
+    return FALSE;
 }
 
 /*
@@ -683,8 +688,6 @@ static void SetExclusiveMonitor(UINT32 targetId)
         return;
     }
 
-    g_isExclusive = TRUE;
-    g_activeTargetId = targetId;
     UpdateTooltip();
 }
 
@@ -719,7 +722,7 @@ static void SaveActiveConfigToDatabase(void)
  */
 static void RestoreOriginal(void)
 {
-    if (!g_isExclusive || g_originalTopologyCount == 0) {
+    if (g_originalTopologyCount == 0 || !IsTopologyChanged()) {
         MessageBoxW(NULL, L"Nothing to restore.",
                     L"MonitorSwitcher", MB_OK | MB_ICONWARNING);
         return;
@@ -849,8 +852,6 @@ static void RestoreOriginal(void)
                     MB_OK | MB_ICONWARNING);
     }
 
-    g_isExclusive = FALSE;
-    g_activeTargetId = 0;
     UpdateTooltip();
 }
 
@@ -1282,15 +1283,15 @@ static void ToggleHdrPrimary(void)
  * Menu layout (top to bottom):
  *   "MonitorSwitcher"               (disabled title)
  *   ────────────────
- *   " *  MonitorName  |  WxH @ FHz"  (active, normal)
- *   ">>  MonitorName  |  WxH @ FHz"  (active, exclusive)
+ *   " *  MonitorName  |  WxH @ FHz"  (active, multiple)
+ *   ">>  MonitorName  |  WxH @ FHz"  (only active monitor)
  *   "     MonitorName  (off)"         (inactive)
  *   ────────────────
  *   "Resolution  [WxH]"         ►   submenu
  *   "Refresh Rate  [FHz]"       ►   submenu
  *   "HDR: MonitorName  [ON/OFF]"    per active HDR monitor
  *   ────────────────
- *   "Restore original config"       (enabled only when exclusive)
+ *   "Restore original config"       (enabled when topology changed)
  *   ────────────────
  *   "Exit"
  *
@@ -1299,16 +1300,21 @@ static void ToggleHdrPrimary(void)
  */
 static void ShowContextMenu(void)
 {
-    /*
-     * Validate exclusive state before building the menu.
-     * If the user changed topology externally (via Windows settings),
-     * our saved state is stale — ValidateExclusiveState resets it.
-     */
-    ValidateExclusiveState();
     UpdateTooltip();
 
     MonitorInfo monitors[MAX_MONITORS];
     int monCount = GetAllMonitors(monitors, MAX_MONITORS);
+
+    /* Count active monitors to determine marker style */
+    int activeCount = 0;
+    UINT32 singleActiveTargetId = 0;
+    int i;
+    for (i = 0; i < monCount; i++) {
+        if (monitors[i].isActive) {
+            activeCount++;
+            singleActiveTargetId = monitors[i].targetId;
+        }
+    }
 
     HMENU hMenu = CreatePopupMenu();
     if (!hMenu) return;
@@ -1319,25 +1325,28 @@ static void ShowContextMenu(void)
 
     /* ── Monitor list ── */
     g_menuMonitorCount = 0;
-    int i;
     for (i = 0; i < monCount && g_menuMonitorCount < MAX_MONITORS; i++) {
         WCHAR label[256];
 
         if (monitors[i].isActive && monitors[i].w > 0) {
-            const WCHAR *marker =
-                (g_isExclusive
-                 && monitors[i].targetId == g_activeTargetId)
-                ? L">>" : L" *";
+            const WCHAR *marker;
+            if (activeCount == 1
+                && monitors[i].targetId == singleActiveTargetId)
+                marker = L">>";
+            else
+                marker = L" *";
             wsprintfW(label, L"%s  %s  |  %ux%u @ %uHz",
                       marker, monitors[i].name,
                       monitors[i].w, monitors[i].h, monitors[i].freq);
         } else if (!monitors[i].isActive) {
             wsprintfW(label, L"     %s  (off)", monitors[i].name);
         } else {
-            const WCHAR *marker =
-                (g_isExclusive
-                 && monitors[i].targetId == g_activeTargetId)
-                ? L">>" : L" *";
+            const WCHAR *marker;
+            if (activeCount == 1
+                && monitors[i].targetId == singleActiveTargetId)
+                marker = L">>";
+            else
+                marker = L" *";
             wsprintfW(label, L"%s  %s", marker, monitors[i].name);
         }
 
@@ -1457,7 +1466,7 @@ static void ShowContextMenu(void)
 
     /* ── Actions ── */
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-    if (g_isExclusive)
+    if (IsTopologyChanged())
         AppendMenuW(hMenu, MF_STRING, IDM_RESTORE,
                     L"Restore original config");
     else
@@ -1486,14 +1495,10 @@ static void ShowContextMenu(void)
 
 /*
  * Asks for confirmation before switching to exclusive mode.
- * Skips if already exclusive on this target or if the monitor
- * is already the only active one.
+ * Skips if the monitor is already the only active one.
  */
 static void ConfirmSwitch(UINT32 targetId)
 {
-    if (g_isExclusive && targetId == g_activeTargetId)
-        return;
-
     MonitorInfo monitors[MAX_MONITORS];
     int monCount = GetAllMonitors(monitors, MAX_MONITORS);
 
@@ -1531,12 +1536,12 @@ static void ConfirmSwitch(UINT32 targetId)
 
 /*
  * Called when the user clicks "Exit" in the tray menu.
- * If in exclusive mode, prompts the user to restore before exiting.
+ * If topology has changed, prompts the user to restore before exiting.
  * Cancel aborts the exit entirely.
  */
 static void ExitHandler(void)
 {
-    if (g_isExclusive) {
+    if (IsTopologyChanged()) {
         int result = MessageBoxW(NULL,
             L"Restore display configuration before exiting?",
             L"MonitorSwitcher", MB_YESNOCANCEL | MB_ICONQUESTION);
@@ -1594,12 +1599,12 @@ static void RemoveTrayIcon(void)
 }
 
 /*
- * Updates the tray tooltip text based on the current exclusive state.
+ * Updates the tray tooltip text based on whether topology changed.
  */
 static void UpdateTooltip(void)
 {
-    if (g_isExclusive)
-        lstrcpyW(g_nid.szTip, L"MonitorSwitcher [exclusive]");
+    if (IsTopologyChanged())
+        lstrcpyW(g_nid.szTip, L"MonitorSwitcher [modified]");
     else
         lstrcpyW(g_nid.szTip, L"MonitorSwitcher");
 
