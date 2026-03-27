@@ -25,7 +25,7 @@
 #define MAX_FREQUENCIES   32
 
 /* Timer IDs */
-#define TIMER_REBUILD      1    /* One-shot 1000ms debounce for WM_DISPLAYCHANGE */
+#define TIMER_REBUILD      1    /* One-shot 2000ms debounce for WM_DISPLAYCHANGE */
 
 /* Custom window message for system tray icon events */
 #define WM_TRAYICON        (WM_APP + 1)
@@ -39,10 +39,10 @@
 #define IDM_EXIT           5001
 
 /* Hotkey IDs for RegisterHotKey / WM_HOTKEY */
-#define HOTKEY_RESTORE     1     /* Ctrl+Win+R */
-#define HOTKEY_MENU        2     /* Ctrl+Win+M */
-#define HOTKEY_HDR         3     /* Ctrl+Win+H */
-#define HOTKEY_MONITOR_BASE 100  /* 100 .. 100+MAX_MONITORS-1 (Ctrl+Alt+1..) */
+#define HOTKEY_RESTORE     1     /* Ctrl+Alt+R */
+#define HOTKEY_MENU        2     /* Ctrl+Alt+M */
+#define HOTKEY_HDR         3     /* Ctrl+Alt+H */
+#define HOTKEY_MONITOR_BASE 100  /* 100 .. 108 = Ctrl+Alt+1..9 */
 
 /* Single-instance mutex name */
 #define MUTEX_NAME         L"MonitorSwitcher_SingleInstance"
@@ -214,16 +214,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Snapshot the current topology so we can restore it later */
     SaveConfig();
 
-    /* Register global hotkeys: Ctrl+Win+R, Ctrl+Win+M, Ctrl+Win+H */
-    RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_WIN, 'R');
-    RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_WIN, 'M');
-    RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_WIN, 'H');
+    /* Register global hotkeys: Ctrl+Alt+R, Ctrl+Alt+M, Ctrl+Alt+H */
+    RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_ALT, 'R');
+    RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_ALT, 'M');
+    RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_ALT, 'H');
 
     /* Register dynamic monitor hotkeys (Ctrl+Alt+1..9) */
     UpdateMonitorHotkeys();
 
     ShowBalloon(L"MonitorSwitcher",
-                L"Ctrl+Win+M = menu  |  Ctrl+Win+R = restore  |  Ctrl+Win+H = HDR\n"
+                L"Ctrl+Alt+M = menu  |  Ctrl+Alt+R = restore  |  Ctrl+Alt+H = HDR\n"
                 L"Ctrl+Alt+1..9 = switch directly to monitor");
 
     /* Standard Win32 message loop — runs until PostQuitMessage(0) */
@@ -243,7 +243,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
  * Handles all messages for the hidden main window:
  *   WM_TIMER:          Debounced display-change rebuild
  *   WM_TRAYICON:       Left/right click on system tray icon
- *   WM_HOTKEY:         Ctrl+Win+R / M / H global hotkeys
+ *   WM_HOTKEY:         Ctrl+Alt+R/M/H + Ctrl+Alt+1..9 global hotkeys
  *   WM_COMMAND:        Context menu item selections
  *   WM_DISPLAYCHANGE:  External display topology changes
  *   WM_DESTROY:        Final cleanup
@@ -257,7 +257,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
         switch (wParam) {
         case TIMER_REBUILD:
             /*
-             * One-shot timer: fired 1000ms after WM_DISPLAYCHANGE.
+             * One-shot timer: fired 2000ms after WM_DISPLAYCHANGE.
              * Gives Windows time to settle after topology changes.
              */
             KillTimer(hwnd, TIMER_REBUILD);
@@ -1299,7 +1299,7 @@ static void ToggleHdr(UINT32 targetId)
 /*
  * Toggles HDR on the primary monitor.
  * Identifies the primary by matching the GDI name from GetActiveGdiName().
- * Used by the Ctrl+Win+H hotkey.
+ * Used by the Ctrl+Alt+H hotkey.
  */
 static void ToggleHdrPrimary(void)
 {
@@ -1574,8 +1574,8 @@ static void ConfirmSwitch(UINT32 targetId)
     WCHAR msg[256];
     wsprintfW(msg,
         L"Activate ONLY %s and turn off all others?\n\n"
-        L"Restore anytime with Ctrl+Win+R or the "
-        L"tray menu (Ctrl+Win+M).", name);
+        L"Restore anytime with Ctrl+Alt+R or the "
+        L"tray menu (Ctrl+Alt+M).", name);
 
     if (MessageBoxW(NULL, msg, L"MonitorSwitcher",
                     MB_YESNO | MB_ICONWARNING) == IDYES) {

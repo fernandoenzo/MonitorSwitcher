@@ -1,6 +1,6 @@
 # MonitorSwitcher
 
-![AutoHotkey v2](https://img.shields.io/badge/AutoHotkey-v2.0%2B-green)
+![C/Win32](https://img.shields.io/badge/C-Win32-blue)
 ![Windows 11](https://img.shields.io/badge/Windows-11-blue)
 ![License: GPLv3+](https://img.shields.io/badge/License-GPLv3+-red)
 
@@ -29,7 +29,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 ```
 MonitorSwitcher
 ────────────────────────────
- *  LG ULTRAGEAR  |  1920x1080 @ 144Hz
+>>  LG ULTRAGEAR  |  1920x1080 @ 144Hz
     LG Dummy Plug  (off)
     VDD by MTT  (off)
 ────────────────────────────
@@ -41,7 +41,7 @@ Restore original config
 Exit
 ```
 
-- **Monitor list** — Click a monitor to activate it exclusively (all others are turned off). The active monitor is marked with `*`, or `>>` when it is the only active monitor.
+- **Monitor list** — Click a monitor to activate it exclusively (all others are turned off). Active monitors are marked with `*` for multiple, or `>>` when only one is active.
 - **Resolution** — Submenu with all available resolutions, sorted largest first. The active one is marked with `>>`.
 - **Refresh Rate** — Submenu with available rates for the current resolution.
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
@@ -51,24 +51,12 @@ Exit
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Win+M` | Open the tray menu at the mouse cursor (works from any screen) |
-| `Ctrl+Win+R` | Restore the original display configuration |
-| `Ctrl+Win+H` | Toggle HDR on/off for the primary monitor |
+| `Ctrl+Alt+M` | Open the tray menu at the mouse cursor (works from any screen) |
+| `Ctrl+Alt+R` | Restore the original display configuration |
+| `Ctrl+Alt+H` | Toggle HDR on/off for the primary monitor |
+| `Ctrl+Alt+1..9` | Switch directly to monitor (no confirmation dialog) |
 
 These hotkeys are essential when working with a single monitor — the tray icon may not be visible on a secondary screen, but the hotkeys always work.
-
-You can change the hotkeys by editing the source. In the AHK version, for example, to use `Ctrl+Alt+R` instead of `Ctrl+Win+R`:
-
-```ahk
-; Change this:
-#^r:: {
-; To this:
-^!r:: {
-```
-
-See the [AutoHotkey v2 Hotkey documentation](https://www.autohotkey.com/docs/v2/Hotkeys.htm) for all available modifiers.
-
-In the C version, modify the `RegisterHotKey` calls in `wWinMain` and recompile.
 
 ## How It Works
 
@@ -91,9 +79,10 @@ No external dependencies, no admin privileges required, no PowerShell, no regist
 Download the latest release from the [Releases](../../releases) page:
 
 - **`MonitorSwitcher.exe`** — Pre-compiled, ready to run. No dependencies needed.
-- **`MonitorSwitcher.ahk`** — AutoHotkey v2 source. Requires [AutoHotkey v2](https://www.autohotkey.com/) to run directly.
 - **`MonitorSwitcher.c`** — Native Win32 C source. Cross-compiles from Linux with MinGW-w64 (`make`).
 
 ## License
 
 This project is licensed under the [GNU General Public License v3 or later (GPLv3+)](https://choosealicense.com/licenses/gpl-3.0/).
+
+**Icon Attribution:** Application icon sourced from [icon-icons.com](https://icon-icons.com/icon/rocket-startup-monitor-screen-computer/124621). License: Free for commercial use.

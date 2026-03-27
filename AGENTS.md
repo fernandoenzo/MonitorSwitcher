@@ -11,8 +11,7 @@
 ## File Structure
 
 ```
-MonitorSwitcher.ahk       # Original AutoHotkey v2 implementation (939 lines)
-MonitorSwitcher.c         # Native Win32 C implementation (~1640 lines)
+MonitorSwitcher.c         # Native Win32 C implementation (~1740 lines)
 MonitorSwitcher.rc        # Windows resource script (embeds the .ico into the .exe)
 MonitorSwitcher.ico       # Application icon
 Makefile                  # Cross-compilation with MinGW-w64 from Linux
@@ -21,8 +20,6 @@ AGENTS.md                 # AI agent coding guidelines
 LICENSE                   # GPLv3
 .gitignore                # Ignores build artifacts (*.exe, *.o, *.res)
 ```
-
-Both the `.ahk` and `.c` implementations are functionally equivalent and maintained in parallel.
 
 ## Building
 
@@ -48,7 +45,7 @@ No automated test framework. Manual testing required:
 2. Right-click (or left-click) tray icon to test menu functionality
 3. Test monitor switching with confirmation dialog
 4. Test resolution and refresh rate changes via submenus
-5. Test hotkeys: Ctrl+Win+M (menu), Ctrl+Win+R (restore), Ctrl+Win+H (HDR toggle)
+5. Test hotkeys: Ctrl+Alt+M (menu), Ctrl+Alt+R (restore), Ctrl+Alt+H (HDR toggle), Ctrl+Alt+1..9 (direct switch)
 6. Test HDR toggle on HDR-capable and non-HDR monitors
 7. Test exit behavior: confirm restore prompt when topology differs from startup
 
@@ -72,7 +69,7 @@ No automated test framework. Manual testing required:
 ### System Tray and UI
 - `Shell_NotifyIconW` — system tray icon, tooltip, and balloon notifications
 - `CreatePopupMenu` / `AppendMenuW` / `TrackPopupMenu` / `DestroyMenu` — context menus with submenus
-- `RegisterHotKey` / `UnregisterHotKey` — global hotkeys (Ctrl+Win+R/M/H)
+- `RegisterHotKey` / `UnregisterHotKey` — global hotkeys (Ctrl+Alt+R/M/H + Ctrl+Alt+1..9)
 - `CreateMutexW` — enforces single instance
 - `MessageBoxW` — confirmation dialogs and error messages
 
@@ -84,8 +81,8 @@ No automated test framework. Manual testing required:
 - `g_selfChanging` — reentrancy guard suppressing WM_DISPLAYCHANGE during our own changes
 - Menu lookup tables (`g_menuMonitorIds`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdrIds`) map menu item IDs to action parameters
 
-### Menu Callback Pattern (C)
-AHK uses closures with `.Bind()`. The C port uses WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
+### Menu Callback Pattern
+WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
 - `IDM_MONITOR_BASE` (1000+) — monitor targetIds
 - `IDM_RES_BASE` (2000+) — resolution entries
 - `IDM_FREQ_BASE` (3000+) — frequency values
@@ -131,10 +128,21 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - `IsTopologyChanged()` queries the current active paths and compares them against `g_originalTopology` to detect any topology change. Used to enable/disable "Restore original config" in the menu, in the exit handler, and for tooltip state display.
 - `g_pathBuf` and `g_modeBuf` are shared global static arrays for `QueryDisplayConfig` results. They are never used recursively — each call overwrites the previous contents.
 - The `Sleep(2000)` in `ExitHandler` is the only blocking sleep in the program. It is acceptable because the app is about to terminate.
-- `WM_DISPLAYCHANGE` is debounced with a 1-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
+- `WM_DISPLAYCHANGE` is debounced with a 2-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
 - Balloon notifications via `Shell_NotifyIconW` + `NIF_INFO` integrate automatically with the Windows 10/11 notification center.
 - The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry`.
 - `WINVER` and `_WIN32_WINNT` must be defined as `0x0601` (Windows 7+) before `#include <windows.h>` for the DISPLAYCONFIG types to be available in MinGW-w64 headers.
+
+## Execution Protocol
+
+**NEVER execute changes without explicit double confirmation:**
+
+1. Always plan first, present to user, wait for approval
+2. Ask if the user wants to execute the plan
+3. If user confirms, ask once more for final confirmation before proceeding
+4. **This applies even in Build Mode** — no exceptions
+
+The user has final say on every action via double confirmation.
 
 ## License
 
