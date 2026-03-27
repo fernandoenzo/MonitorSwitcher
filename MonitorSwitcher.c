@@ -70,8 +70,6 @@ typedef struct {
     UINT32 w;
     UINT32 h;
     UINT32 freq;
-    WORD   manufId;
-    WORD   prodCode;
 } MonitorInfo;
 
 typedef struct {
@@ -331,17 +329,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
 /* ─── DisplayConfig Helpers ─────────────────────────────────────────── */
 
 /*
- * Enumerates all physically connected monitors in a stable, monitor-centric order.
+ * Enumerates all physically connected monitors in a port-centric stable order.
  * Three-phase approach:
  *   Phase 1: QDC_ONLY_ACTIVE_PATHS — get current GDI name, resolution,
  *            and refresh rate for each active target.
- *   Phase 2: QDC_ALL_PATHS — discover all hardware targets, filter ghosts,
- *            and extract EDID Manufacturer ID and Product Code.
- *   Phase 3: Sort by EDID to guarantee a perfectly stable menu order
- *            regardless of the physical port the monitor is connected to.
- *
- *
- *
+ *   Phase 2: QDC_ALL_PATHS — discover all hardware targets, filter ghosts.
+ *   Phase 3: Sort by Adapter LUID and Target ID to perfectly mirror
+ *            the port-centric numbering of Windows Settings.
  *
  * Returns the number of monitors written to the output array.
  */
@@ -350,14 +344,14 @@ static int CompareMonitors(const void *a, const void *b)
     const MonitorInfo *m1 = (const MonitorInfo *)a;
     const MonitorInfo *m2 = (const MonitorInfo *)b;
 
-    if (m1->manufId != m2->manufId) {
-        return (int)m1->manufId - (int)m2->manufId;
+    if (m1->luidHigh != m2->luidHigh) {
+        return (m1->luidHigh < m2->luidHigh) ? -1 : 1;
     }
-    if (m1->prodCode != m2->prodCode) {
-        return (int)m1->prodCode - (int)m2->prodCode;
+    if (m1->luidLow != m2->luidLow) {
+        return (m1->luidLow < m2->luidLow) ? -1 : 1;
     }
     if (m1->targetId != m2->targetId) {
-        return (int)m1->targetId - (int)m2->targetId;
+        return (m1->targetId < m2->targetId) ? -1 : 1;
     }
     return 0;
 }
@@ -435,7 +429,7 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
         }
     }
 
-    /* Phase 2: Enumerate all connected targets, extract EDID and filter ghosts */
+    /* Phase 2: Enumerate all connected targets, filter ghosts */
     UINT32 pc = 0, mc = 0;
     if (GetDisplayConfigBufferSizes(QDC_ALL_PATHS, &pc, &mc)
             == ERROR_SUCCESS && pc > 0) {
@@ -460,7 +454,7 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
                 }
                 if (seen) continue;
 
-                /* Resolve friendly name and EDID via type 2 */
+                /* Resolve friendly name and device path via type 2 */
                 DISPLAYCONFIG_TARGET_DEVICE_NAME tgtName;
                 ZeroMemory(&tgtName, sizeof(tgtName));
                 tgtName.header.type =
@@ -489,8 +483,6 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
                     g_pathBuf[i].targetInfo.adapterId.LowPart;
                 mon->luidHigh =
                     (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
-                mon->manufId  = tgtName.edidManufactureId;
-                mon->prodCode = tgtName.edidProductCodeId;
 
                 /* Cross-reference with active info from Phase 1 */
                 mon->isActive = FALSE;
@@ -511,7 +503,7 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
         }
     }
 
-    /* Phase 3: Sort by EDID to guarantee stable order */
+    /* Phase 3: Sort by LUID + Target ID to perfectly mirror port-centric order */
     if (count > 1) {
         qsort(monitors, count, sizeof(MonitorInfo), CompareMonitors);
     }
