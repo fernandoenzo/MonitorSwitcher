@@ -42,6 +42,7 @@
 #define HOTKEY_RESTORE     1     /* Ctrl+Win+R */
 #define HOTKEY_MENU        2     /* Ctrl+Win+M */
 #define HOTKEY_HDR         3     /* Ctrl+Win+H */
+#define HOTKEY_MONITOR_BASE 100  /* 100 .. 100+MAX_MONITORS-1 (Ctrl+Alt+1..) */
 
 /* Single-instance mutex name */
 #define MUTEX_NAME         L"MonitorSwitcher_SingleInstance"
@@ -94,6 +95,9 @@ static int              g_originalTopologyCount = 0;
 
 /* Reentrancy guard — suppresses WM_DISPLAYCHANGE during our own changes */
 static BOOL             g_selfChanging         = FALSE;
+
+/* Dynamic hotkeys */
+static int              g_hotkeyMonitorCount   = 0;
 
 /* Menu callback lookup tables — filled by ShowContextMenu, read by WM_COMMAND */
 static UINT32           g_menuMonitorIds[MAX_MONITORS];
@@ -156,6 +160,9 @@ static void RemoveTrayIcon(void);
 static void UpdateTooltip(void);
 static void ShowBalloon(const WCHAR *title, const WCHAR *text);
 
+/* Hotkeys */
+static void UpdateMonitorHotkeys(void);
+
 /* Cleanup */
 static void CleanExit(void);
 
@@ -212,8 +219,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_WIN, 'M');
     RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_WIN, 'H');
 
+    /* Register dynamic monitor hotkeys (Ctrl+Alt+1..9) */
+    UpdateMonitorHotkeys();
+
     ShowBalloon(L"MonitorSwitcher",
-                L"Ctrl+Win+M = menu  |  Ctrl+Win+R = restore  |  Ctrl+Win+H = HDR");
+                L"Ctrl+Win+M = menu  |  Ctrl+Win+R = restore  |  Ctrl+Win+H = HDR\n"
+                L"Ctrl+Alt+1..9 = switch directly to monitor");
 
     /* Standard Win32 message loop — runs until PostQuitMessage(0) */
     MSG msg;
@@ -251,6 +262,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
              */
             KillTimer(hwnd, TIMER_REBUILD);
             UpdateTooltip();
+            UpdateMonitorHotkeys();
             break;
         }
         return 0;
@@ -264,6 +276,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
         return 0;
 
     case WM_HOTKEY:
+        if (wParam >= HOTKEY_MONITOR_BASE
+            && wParam < HOTKEY_MONITOR_BASE + (WPARAM)g_hotkeyMonitorCount) {
+            int index = (int)(wParam - HOTKEY_MONITOR_BASE);
+            MonitorInfo monitors[MAX_MONITORS];
+            int monCount = GetAllMonitors(monitors, MAX_MONITORS);
+            if (index < monCount) {
+                SetExclusiveMonitor(monitors[index].targetId);
+            }
+            return 0;
+        }
+
         switch (wParam) {
         case HOTKEY_RESTORE:
             if (IsTopologyChanged()) {
@@ -1652,6 +1675,35 @@ static void ShowBalloon(const WCHAR *title, const WCHAR *text)
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
 
+/* ─── Hotkeys ───────────────────────────────────────────────────────── */
+
+/*
+ * Dynamically registers Ctrl+Alt+1..9 hotkeys based on connected monitors.
+ * Called at startup and when topology changes.
+ */
+static void UpdateMonitorHotkeys(void)
+{
+    MonitorInfo monitors[MAX_MONITORS];
+    int monCount = GetAllMonitors(monitors, MAX_MONITORS);
+
+    /* Unregister old hotkeys */
+    int i;
+    for (i = 0; i < g_hotkeyMonitorCount; i++) {
+        UnregisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i);
+    }
+
+    g_hotkeyMonitorCount = 0;
+
+    /* Register new hotkeys (up to 9) */
+    int toRegister = (monCount > 9) ? 9 : monCount;
+    for (i = 0; i < toRegister; i++) {
+        RegisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i,
+                       MOD_CONTROL | MOD_ALT, '1' + i);
+    }
+
+    g_hotkeyMonitorCount = toRegister;
+}
+
 /* ─── Clean Exit ────────────────────────────────────────────────────── */
 
 /*
@@ -1668,6 +1720,12 @@ static void CleanExit(void)
     UnregisterHotKey(g_hwndMain, HOTKEY_RESTORE);
     UnregisterHotKey(g_hwndMain, HOTKEY_MENU);
     UnregisterHotKey(g_hwndMain, HOTKEY_HDR);
+    
+    int i;
+    for (i = 0; i < g_hotkeyMonitorCount; i++) {
+        UnregisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i);
+    }
+    
     RemoveTrayIcon();
     DestroyWindow(g_hwndMain);
 }
