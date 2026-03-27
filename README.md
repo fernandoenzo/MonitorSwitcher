@@ -6,6 +6,16 @@
 
 A lightweight system tray utility for Windows 11 that lets you instantly switch between monitors, change resolution, refresh rate, and toggle HDR — all from a single menu.
 
+## Table of Contents
+
+- [Features](#features)
+- [Usage](#usage)
+  - [Tray Menu](#tray-menu)
+  - [Global Hotkeys](#global-hotkeys)
+- [How It Works](#how-it-works)
+- [Building from Source](#building-from-source)
+- [License](#license)
+
 ## Features
 
 - **Exclusive monitor mode** — Activate a single monitor and disable all others with one click. Useful for gaming, streaming, or remote desktop setups.
