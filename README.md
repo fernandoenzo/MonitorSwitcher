@@ -74,12 +74,16 @@ MonitorSwitcher uses several Windows APIs, each for what it does best:
 
 No external dependencies, no admin privileges required, no PowerShell, no registry hacking.
 
-## Download
+## Building from Source
 
-Download the latest release from the [Releases](../../releases) page:
+To cross-compile from Linux (Debian/Ubuntu):
 
-- **`MonitorSwitcher.exe`** — Pre-compiled, ready to run. No dependencies needed.
-- **`MonitorSwitcher.c`** — Native Win32 C source. Cross-compiles from Linux with MinGW-w64 (`make`).
+```bash
+sudo apt install build-essential mingw-w64
+make clean && make
+```
+
+This produces `MonitorSwitcher.exe`, a standalone Windows executable with the application icon embedded as a resource.
 
 ## License
 
