@@ -337,7 +337,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
          * need to rebuild it here.
          */
         if (!g_selfChanging) {
-            SetTimer(hwnd, TIMER_REBUILD, 1000, NULL);
+            SetTimer(hwnd, TIMER_REBUILD, 2000, NULL);
         }
         return 0;
 
@@ -736,6 +736,7 @@ static void SetExclusiveMonitor(UINT32 targetId)
         return;
     }
 
+    UpdateMonitorHotkeys();
     UpdateTooltip();
 }
 
@@ -900,6 +901,7 @@ static void RestoreOriginal(void)
                     MB_OK | MB_ICONWARNING);
     }
 
+    UpdateMonitorHotkeys();
     UpdateTooltip();
 }
 
@@ -1348,6 +1350,7 @@ static void ToggleHdrPrimary(void)
  */
 static void ShowContextMenu(void)
 {
+    UpdateMonitorHotkeys();
     UpdateTooltip();
 
     MonitorInfo monitors[MAX_MONITORS];
