@@ -1679,12 +1679,13 @@ static void UpdateTooltip(void)
 
 /*
  * Shows a balloon notification from the tray icon.
- * Integrates with the Windows 10/11 notification center automatically.
+ * Integrates with Windows 11 notification center automatically.
  */
 static void ShowBalloon(const WCHAR *title, const WCHAR *text)
 {
-    g_nid.uFlags     = NIF_INFO;
-    g_nid.dwInfoFlags = NIIF_INFO;
+    g_nid.uFlags       = NIF_INFO;
+    g_nid.dwInfoFlags  = NIIF_USER | NIIF_LARGE_ICON;
+    g_nid.hBalloonIcon = g_hIcon;
     lstrcpynW(g_nid.szInfoTitle, title,
               sizeof(g_nid.szInfoTitle) / sizeof(WCHAR));
     lstrcpynW(g_nid.szInfo, text,
