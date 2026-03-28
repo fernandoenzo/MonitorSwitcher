@@ -1416,27 +1416,30 @@ static void ShowContextMenu(void)
     g_menuMonitorCount = 0;
     for (i = 0; i < monCount && g_menuMonitorCount < MAX_MONITORS; i++) {
         WCHAR label[256];
+        int num = g_menuMonitorCount + 1;
 
         if (monitors[i].isActive && monitors[i].w > 0) {
             const WCHAR *marker;
             if (activeCount == 1
                 && monitors[i].targetId == singleActiveTargetId)
-                marker = L">>";
+                marker = L"★";
             else
-                marker = L" *";
-            wsprintfW(label, L"%s  %s  |  %ux%u @ %uHz",
-                      marker, monitors[i].name,
+                marker = L"☆";
+            wsprintfW(label, L"%s  %d. %s  |  %ux%u @ %uHz",
+                      marker, num, monitors[i].name,
                       monitors[i].w, monitors[i].h, monitors[i].freq);
         } else if (!monitors[i].isActive) {
-            wsprintfW(label, L"     %s  (off)", monitors[i].name);
+            wsprintfW(label, L"     %d. %s  (off)",
+                      num, monitors[i].name);
         } else {
             const WCHAR *marker;
             if (activeCount == 1
                 && monitors[i].targetId == singleActiveTargetId)
-                marker = L">>";
+                marker = L"★";
             else
-                marker = L" *";
-            wsprintfW(label, L"%s  %s", marker, monitors[i].name);
+                marker = L"☆";
+            wsprintfW(label, L"%s  %d. %s",
+                      marker, num, monitors[i].name);
         }
 
         UINT menuId = IDM_MONITOR_BASE + (UINT)g_menuMonitorCount;

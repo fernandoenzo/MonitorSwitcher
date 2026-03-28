@@ -39,22 +39,30 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 
 ```
 MonitorSwitcher
-────────────────────────────
->>  LG ULTRAGEAR  |  1920x1080 @ 144Hz
-    LG Dummy Plug  (off)
-    VDD by MTT  (off)
-────────────────────────────
+───────────────────────────
+★  1. LG ULTRAGEAR  |  1920x1080 @ 144Hz
+   2. LG Dummy Plug  (off)
+   3. VDD by MTT  (off)
+───────────────────────────
 Resolution   [1920x1080]  ►
 Refresh Rate [144Hz]      ►
 HDR: LG ULTRAGEAR [ON]
-────────────────────────────
+───────────────────────────
 Restore original config
-────────────────────────────
+───────────────────────────
 ✓ Start with Windows
 Exit
 ```
 
-- **Monitor list** — Click a monitor to activate it exclusively (all others are turned off). Active monitors are marked with `*` for multiple, or `>>` when only one is active.
+When multiple monitors are active (extend/clone mode):
+
+```
+☆  1. LG ULTRAGEAR  |  1920x1080 @ 144Hz
+☆  2. LG Dummy Plug  |  1920x1080 @ 60Hz
+   3. VDD by MTT  (off)
+```
+
+- **Monitor list** — Monitors are numbered (`1.`, `2.`, `3.`) corresponding to `Ctrl+Alt+1..9` hotkeys. Click a monitor to activate it exclusively (all others are turned off). Active monitors are marked with `★` (exclusive) or `☆` (extend/clone). Inactive monitors show `(off)`.
 - **Resolution** — Submenu with all available resolutions, sorted largest first. The active one is marked with `>>`.
 - **Refresh Rate** — Submenu with available rates for the current resolution.
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
