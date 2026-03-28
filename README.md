@@ -26,6 +26,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 - **Virtual Display Driver support** — Works with physical monitors and virtual displays like [Virtual Display Driver (VDD)](https://github.com/itsmikethetech/Virtual-Display-Driver).
 - **Automatic state detection** — The menu refreshes automatically when Windows detects display changes (monitor plugged/unplugged, etc.).
 - **One-click restore** — Return to your original multi-monitor layout at any time.
+- **Start with Windows** — Optional auto-start via the tray menu (writes to `HKCU\...\Run`, no admin required).
 - **Emergency hotkeys** — Global shortcuts work from any screen, even when the taskbar isn't visible.
 
 ## Usage
@@ -48,6 +49,8 @@ Refresh Rate [144Hz]      ►
 HDR: LG ULTRAGEAR [ON]
 ────────────────────────────
 Restore original config
+────────────────────────────
+✓ Start with Windows
 Exit
 ```
 
@@ -56,6 +59,7 @@ Exit
 - **Refresh Rate** — Submenu with available rates for the current resolution.
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
 - **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
+- **Start with Windows** — Toggles auto-start at logon. When enabled, writes the executable path to the Windows Run registry key (`HKCU`).
 
 ### Global Hotkeys
 

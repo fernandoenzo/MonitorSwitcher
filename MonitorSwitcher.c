@@ -36,7 +36,12 @@
 #define IDM_FREQ_BASE      3000   /* 3000 .. 3000+MAX_FREQUENCIES-1 */
 #define IDM_HDR_BASE       4000   /* 4000 .. 4000+MAX_MONITORS-1  */
 #define IDM_RESTORE        5000
-#define IDM_EXIT           5001
+#define IDM_AUTOSTART      5001
+#define IDM_EXIT           5002
+
+/* Registry key and value for auto-start with Windows */
+#define AUTOSTART_KEY      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define AUTOSTART_VALUE    L"MonitorSwitcher"
 
 /* Hotkey IDs for RegisterHotKey / WM_HOTKEY */
 #define HOTKEY_RESTORE     1     /* Ctrl+Alt+R */
@@ -162,6 +167,10 @@ static void ShowBalloon(const WCHAR *title, const WCHAR *text);
 
 /* Hotkeys */
 static void UpdateMonitorHotkeys(void);
+
+/* Auto-start */
+static BOOL IsAutoStartEnabled(void);
+static void SetAutoStart(BOOL enable);
 
 /* Cleanup */
 static void CleanExit(void);
@@ -323,6 +332,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             ToggleHdr(g_menuHdrIds[id - IDM_HDR_BASE]);
         } else if (id == IDM_RESTORE) {
             RestoreOriginal();
+        } else if (id == IDM_AUTOSTART) {
+            SetAutoStart(!IsAutoStartEnabled());
         } else if (id == IDM_EXIT) {
             ExitHandler();
         }
@@ -1343,6 +1354,7 @@ static void ToggleHdrPrimary(void)
  *   ────────────────
  *   "Restore original config"       (enabled when topology changed)
  *   ────────────────
+ *   "Start with Windows"            (checked/unchecked toggle)
  *   "Exit"
  *
  * Menu item selections arrive as WM_COMMAND messages.  Lookup tables
@@ -1525,6 +1537,8 @@ static void ShowContextMenu(void)
                     L"Restore original config");
 
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING | (IsAutoStartEnabled() ? MF_CHECKED : MF_UNCHECKED),
+                IDM_AUTOSTART, L"Start with Windows");
     AppendMenuW(hMenu, MF_STRING, IDM_EXIT, L"Exit");
 
     /*
@@ -1705,6 +1719,54 @@ static void UpdateMonitorHotkeys(void)
     }
 
     g_hotkeyMonitorCount = toRegister;
+}
+
+/* ─── Auto-Start ────────────────────────────────────────────────────── */
+
+/*
+ * Checks whether MonitorSwitcher is registered to start with Windows.
+ * Reads HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
+ */
+static BOOL IsAutoStartEnabled(void)
+{
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, AUTOSTART_KEY,
+                      0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return FALSE;
+
+    DWORD valueType = 0;
+    DWORD valueSize = 0;
+    LONG ret = RegQueryValueExW(hKey, AUTOSTART_VALUE, NULL,
+                                &valueType, NULL, &valueSize);
+    RegCloseKey(hKey);
+
+    return (ret == ERROR_SUCCESS && valueType == REG_SZ);
+}
+
+/*
+ * Enables or disables auto-start with Windows.
+ * When enabling, writes the full path of the current executable to
+ * HKCU\...\Run so Windows launches it at logon.
+ * When disabling, deletes the registry value.
+ */
+static void SetAutoStart(BOOL enable)
+{
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, AUTOSTART_KEY,
+                      0, KEY_WRITE, &hKey) != ERROR_SUCCESS)
+        return;
+
+    if (enable) {
+        WCHAR exePath[MAX_PATH];
+        GetModuleFileNameW(NULL, exePath, MAX_PATH);
+        RegSetValueExW(hKey, AUTOSTART_VALUE, 0, REG_SZ,
+                       (const BYTE *)exePath,
+                       (DWORD)((lstrlenW(exePath) + 1) * sizeof(WCHAR)));
+    } else {
+        RegDeleteValueW(hKey, AUTOSTART_VALUE);
+    }
+
+    RegCloseKey(hKey);
 }
 
 /* ─── Clean Exit ────────────────────────────────────────────────────── */

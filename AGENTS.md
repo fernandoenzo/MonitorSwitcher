@@ -48,6 +48,7 @@ No automated test framework. Manual testing required:
 5. Test hotkeys: Ctrl+Alt+M (menu), Ctrl+Alt+R (restore), Ctrl+Alt+H (HDR toggle), Ctrl+Alt+1..9 (direct switch)
 6. Test HDR toggle on HDR-capable and non-HDR monitors
 7. Test exit behavior: confirm restore prompt when topology differs from startup
+8. Test "Start with Windows" toggle: verify registry entry is created/removed in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
 
 ## Key Win32 APIs Used
 
@@ -65,6 +66,9 @@ No automated test framework. Manual testing required:
 
 ### Registry (HDR)
 - `RegOpenKeyExW` / `RegEnumKeyExW` / `RegQueryValueExW` / `RegCloseKey` — read HDR state from `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\MonitorDataStore`
+
+### Registry (Auto-Start)
+- `RegOpenKeyExW` / `RegQueryValueExW` / `RegSetValueExW` / `RegDeleteValueW` / `RegCloseKey` — read/write auto-start entry in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
 
 ### System Tray and UI
 - `Shell_NotifyIconW` — system tray icon, tooltip, and balloon notifications
@@ -130,7 +134,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - The `Sleep(2000)` in `ExitHandler` is the only blocking sleep in the program. It is acceptable because the app is about to terminate.
 - `WM_DISPLAYCHANGE` is debounced with a 2-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
 - Balloon notifications via `Shell_NotifyIconW` + `NIF_INFO` integrate automatically with the Windows 10/11 notification center.
-- The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry`.
+- The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry` and the auto-start feature.
 - `WINVER` and `_WIN32_WINNT` must be defined as `0x0601` (Windows 7+) before `#include <windows.h>` for the DISPLAYCONFIG types to be available in MinGW-w64 headers.
 
 ## Execution Protocol
