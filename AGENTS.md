@@ -110,7 +110,7 @@ Monitors are sorted by `{luidHigh, luidLow, targetId}` — this replicates the e
 `g_hotkeysEnabled` controls whether hotkeys are registered. When toggled via `IDM_TOGGLE_HOTKEYS`, all hotkeys are unregistered first (`UnregisterHotkeys()`), then conditionally re-registered based on the new state. Balloon notifications provide immediate feedback to the user.
 
 ### Balloon Notifications
-`ShowBalloon()` cancels any pending balloon (sends empty `szInfo`) before displaying a new one, preventing balloon queuing when rapidly toggling features. A one-shot timer (`TIMER_CLOSE_BALLOON`, 5 seconds) automatically dismisses the balloon. Uses `NIIF_USER | NIIF_LARGE_ICON` with the application icon.
+`ShowBalloon()` cancels any pending balloon (sends empty `szInfo`) before displaying a new one, preventing balloon queuing when rapidly toggling features. A one-shot timer (`TIMER_CLOSE_BALLOON`, 3.5 seconds) automatically dismisses the balloon. Uses `NIIF_USER | NIIF_LARGE_ICON` with the application icon.
 
 ### Exclusive Mode (Three-Attempt Strategy)
 Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply topology:
@@ -151,7 +151,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - `WM_DISPLAYCHANGE` is debounced with a 2-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
 - Balloon notifications via `Shell_NotifyIconW` + `NIF_INFO` integrate automatically with the Windows 10/11 notification center.
 - `ShowBalloon()` cancels any pending balloon before showing a new one, preventing queuing when rapidly toggling features (e.g. HDR ON/OFF).
-- `TIMER_CLOSE_BALLOON` (5 seconds) auto-dismisses balloons. Without this, Windows controls the duration (5-25 seconds depending on accessibility settings).
+- `TIMER_CLOSE_BALLOON` (3.5 seconds) auto-dismisses balloons. Without this, Windows controls the duration (5-25 seconds depending on accessibility settings).
 - The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry` and the auto-start feature.
 - `WINVER` and `_WIN32_WINNT` must be defined as `0x0601` (Windows 7+) before `#include <windows.h>` for the DISPLAYCONFIG types to be available in MinGW-w64 headers.
 
