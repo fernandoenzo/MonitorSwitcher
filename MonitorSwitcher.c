@@ -731,6 +731,24 @@ static void SetExclusiveMonitor(UINT32 targetId)
                         MB_OK | MB_ICONWARNING);
         } else {
             SaveActiveConfigToDatabase();
+
+            /* Show balloon with the monitor's friendly name */
+            DISPLAYCONFIG_TARGET_DEVICE_NAME tgtName;
+            ZeroMemory(&tgtName, sizeof(tgtName));
+            tgtName.header.type  = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+            tgtName.header.size  = sizeof(tgtName);
+            tgtName.header.adapterId = singlePath.targetInfo.adapterId;
+            tgtName.header.id    = targetId;
+
+            WCHAR balloonMsg[128];
+            if (DisplayConfigGetDeviceInfo(&tgtName.header) == ERROR_SUCCESS
+                && tgtName.monitorFriendlyDeviceName[0] != L'\0') {
+                wsprintfW(balloonMsg, L"Switched to %ls",
+                          tgtName.monitorFriendlyDeviceName);
+            } else {
+                wsprintfW(balloonMsg, L"Switched to monitor %u", targetId);
+            }
+            ShowBalloon(L"MonitorSwitcher", balloonMsg);
         }
 
         found = TRUE;
