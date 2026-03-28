@@ -1,6 +1,7 @@
 CC      = x86_64-w64-mingw32-gcc
 WINDRES = x86_64-w64-mingw32-windres
-CFLAGS  = -O2 -Wall -Wextra -mwindows -municode
+VERSION = $(shell git describe --tags --dirty 2>/dev/null || echo dev)
+CFLAGS  = -O2 -Wall -Wextra -mwindows -municode -DVERSION_STRING=L\"$(VERSION)\"
 LDFLAGS = -lshell32 -luser32 -lkernel32 -ladvapi32
 TARGET  = MonitorSwitcher.exe
 SRC     = MonitorSwitcher.c

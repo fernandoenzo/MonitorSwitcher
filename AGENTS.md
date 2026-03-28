@@ -38,6 +38,8 @@ make clean
 
 This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon embedded as a resource. The Makefile links against `-lshell32 -luser32 -lkernel32 -ladvapi32` (advapi32 is needed for registry APIs used by HDR and auto-start).
 
+The Makefile defines `VERSION` using `git describe --tags --dirty` with fallback to `dev` for builds outside a git repository. The version is passed to the compiler via `-DVERSION_STRING`.
+
 ## Testing
 
 No automated test framework. Manual testing required:

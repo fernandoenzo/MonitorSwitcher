@@ -38,7 +38,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 3. Right-click the tray icon to access all features:
 
 ```
-MonitorSwitcher
+MonitorSwitcher 1.5.1
 ───────────────────────────
 ★  1. LG ULTRAGEAR  |  1920x1080 @ 144Hz
    2. LG Dummy Plug  (off)
@@ -108,6 +108,8 @@ make clean && make
 ```
 
 This produces `MonitorSwitcher.exe`, a standalone Windows executable with the application icon embedded as a resource.
+
+The version string is automatically extracted from git tags using `git describe --tags --dirty`. To release a new version, simply create a new tag — no code changes needed. The `-dirty` suffix indicates uncommitted changes in the working tree.
 
 ## License
 

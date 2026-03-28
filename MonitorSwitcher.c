@@ -1433,7 +1433,7 @@ static void ShowContextMenu(void)
     if (!hMenu) return;
 
     /* Title label (disabled, not clickable) */
-    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, L"MonitorSwitcher");
+    AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, L"MonitorSwitcher " VERSION_STRING);
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
 
     /* ── Monitor list ── */
@@ -1704,7 +1704,7 @@ static void SetupTrayIcon(void)
     g_nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAYICON;
     g_nid.hIcon            = g_hIcon;
-    lstrcpyW(g_nid.szTip, L"MonitorSwitcher");
+    lstrcpyW(g_nid.szTip, L"MonitorSwitcher " VERSION_STRING);
 
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 }
@@ -1727,9 +1727,9 @@ static void RemoveTrayIcon(void)
 static void UpdateTooltip(void)
 {
     if (IsTopologyChanged())
-        lstrcpyW(g_nid.szTip, L"MonitorSwitcher [modified]");
+        lstrcpyW(g_nid.szTip, L"MonitorSwitcher " VERSION_STRING L" [modified]");
     else
-        lstrcpyW(g_nid.szTip, L"MonitorSwitcher");
+        lstrcpyW(g_nid.szTip, L"MonitorSwitcher " VERSION_STRING);
 
     g_nid.uFlags = NIF_TIP;
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
