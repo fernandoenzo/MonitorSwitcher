@@ -39,6 +39,7 @@
 #define IDM_RESTORE        5000
 #define IDM_AUTOSTART      5001
 #define IDM_EXIT           5002
+#define IDM_TOGGLE_HOTKEYS 5003
 
 /* Registry key and value for auto-start with Windows */
 #define AUTOSTART_KEY      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
@@ -103,6 +104,7 @@ static int              g_originalTopologyCount = 0;
 static BOOL             g_selfChanging         = FALSE;
 
 /* Dynamic hotkeys */
+static BOOL             g_hotkeysEnabled      = TRUE;
 static int              g_hotkeyMonitorCount   = 0;
 
 /* Menu callback lookup tables — filled by ShowContextMenu, read by WM_COMMAND */
@@ -168,6 +170,7 @@ static void ShowBalloon(const WCHAR *title, const WCHAR *text);
 
 /* Hotkeys */
 static void UpdateMonitorHotkeys(void);
+static void UnregisterHotkeys(void);
 
 /* Auto-start */
 static BOOL IsAutoStartEnabled(void);
@@ -225,16 +228,23 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     SaveConfig();
 
     /* Register global hotkeys: Ctrl+Alt+R, Ctrl+Alt+M, Ctrl+Alt+H */
-    RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_ALT, 'R');
-    RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_ALT, 'M');
-    RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_ALT, 'H');
+    if (g_hotkeysEnabled) {
+        RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_ALT, 'R');
+        RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_ALT, 'M');
+        RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_ALT, 'H');
 
-    /* Register dynamic monitor hotkeys (Ctrl+Alt+1..9) */
-    UpdateMonitorHotkeys();
+        /* Register dynamic monitor hotkeys (Ctrl+Alt+1..9) */
+        UpdateMonitorHotkeys();
+    }
 
-    ShowBalloon(L"MonitorSwitcher",
-                L"Ctrl+Alt+M = menu  |  Ctrl+Alt+R = restore  |  Ctrl+Alt+H = HDR\n"
-                L"Ctrl+Alt+1..9 = switch directly to monitor");
+    if (g_hotkeysEnabled) {
+        ShowBalloon(L"MonitorSwitcher",
+                    L"Ctrl+Alt+M = menu  |  Ctrl+Alt+R = restore  |  Ctrl+Alt+H = HDR\n"
+                    L"Ctrl+Alt+1..9 = switch directly to monitor");
+    } else {
+        ShowBalloon(L"MonitorSwitcher",
+                    L"Hotkeys are disabled. Right-click the tray icon to enable them.");
+    }
 
     /* Standard Win32 message loop — runs until PostQuitMessage(0) */
     MSG msg;
@@ -342,6 +352,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             RestoreOriginal();
         } else if (id == IDM_AUTOSTART) {
             SetAutoStart(!IsAutoStartEnabled());
+        } else if (id == IDM_TOGGLE_HOTKEYS) {
+            g_hotkeysEnabled = !g_hotkeysEnabled;
+            UnregisterHotkeys();
+            if (g_hotkeysEnabled) {
+                RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_ALT, 'R');
+                RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_ALT, 'M');
+                RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_ALT, 'H');
+                UpdateMonitorHotkeys();
+                ShowBalloon(L"Hotkeys enabled",
+                            L"Ctrl+Alt+M/R/H and monitor hotkeys are now active");
+            } else {
+                ShowBalloon(L"Hotkeys disabled",
+                            L"All hotkeys have been unregistered");
+            }
         } else if (id == IDM_EXIT) {
             ExitHandler();
         }
@@ -1566,6 +1590,11 @@ static void ShowContextMenu(void)
                     L"Restore original config");
 
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    if (g_hotkeysEnabled) {
+        AppendMenuW(hMenu, MF_STRING | MF_CHECKED, IDM_TOGGLE_HOTKEYS, L"Hotkeys enabled");
+    } else {
+        AppendMenuW(hMenu, MF_STRING | MF_UNCHECKED, IDM_TOGGLE_HOTKEYS, L"Hotkeys disabled");
+    }
     AppendMenuW(hMenu, MF_STRING | (IsAutoStartEnabled() ? MF_CHECKED : MF_UNCHECKED),
                 IDM_AUTOSTART, L"Start with Windows");
     AppendMenuW(hMenu, MF_STRING, IDM_EXIT, L"Exit");
@@ -1752,14 +1781,33 @@ static void UpdateMonitorHotkeys(void)
 
     g_hotkeyMonitorCount = 0;
 
-    /* Register new hotkeys (up to 9) */
-    int toRegister = (monCount > 9) ? 9 : monCount;
-    for (i = 0; i < toRegister; i++) {
-        RegisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i,
-                       MOD_CONTROL | MOD_ALT, '1' + i);
-    }
+    if (g_hotkeysEnabled) {
+        /* Register new hotkeys (up to 9) */
+        int toRegister = (monCount > 9) ? 9 : monCount;
+        for (i = 0; i < toRegister; i++) {
+            RegisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i,
+                           MOD_CONTROL | MOD_ALT, '1' + i);
+        }
 
-    g_hotkeyMonitorCount = toRegister;
+        g_hotkeyMonitorCount = toRegister;
+    }
+}
+
+/*
+ * Unregisters all hotkeys (fixed + dynamic).
+ * Safe to call even if hotkeys were never registered.
+ */
+static void UnregisterHotkeys(void)
+{
+    UnregisterHotKey(g_hwndMain, HOTKEY_RESTORE);
+    UnregisterHotKey(g_hwndMain, HOTKEY_MENU);
+    UnregisterHotKey(g_hwndMain, HOTKEY_HDR);
+
+    int i;
+    for (i = 0; i < g_hotkeyMonitorCount; i++) {
+        UnregisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i);
+    }
+    g_hotkeyMonitorCount = 0;
 }
 
 /* ─── Auto-Start ────────────────────────────────────────────────────── */
@@ -1824,14 +1872,7 @@ static void CleanExit(void)
 {
     KillTimer(g_hwndMain, TIMER_REBUILD);
     KillTimer(g_hwndMain, TIMER_CLOSE_BALLOON);
-    UnregisterHotKey(g_hwndMain, HOTKEY_RESTORE);
-    UnregisterHotKey(g_hwndMain, HOTKEY_MENU);
-    UnregisterHotKey(g_hwndMain, HOTKEY_HDR);
-
-    int i;
-    for (i = 0; i < g_hotkeyMonitorCount; i++) {
-        UnregisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i);
-    }
+    UnregisterHotkeys();
 
     RemoveTrayIcon();
     DestroyWindow(g_hwndMain);

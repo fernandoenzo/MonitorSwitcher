@@ -47,8 +47,9 @@ No automated test framework. Manual testing required:
 4. Test resolution and refresh rate changes via submenus
 5. Test hotkeys: Ctrl+Alt+M (menu), Ctrl+Alt+R (restore), Ctrl+Alt+H (HDR toggle), Ctrl+Alt+1..9 (direct switch)
 6. Test HDR toggle on HDR-capable and non-HDR monitors
-7. Test exit behavior: confirm restore prompt when topology differs from startup
-8. Test "Start with Windows" toggle: verify registry entry is created/removed in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+7. Test "Hotkeys enabled" toggle: verify hotkeys can be disabled/enabled and balloon notifications appear
+8. Test exit behavior: confirm restore prompt when topology differs from startup
+9. Test "Start with Windows" toggle: verify registry entry is created/removed in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
 
 ## Key Win32 APIs Used
 
@@ -102,6 +103,9 @@ Monitors are sorted by `{luidHigh, luidLow, targetId}` — this replicates the e
 
 ### Dynamic Hotkeys (Ctrl+Alt+1..9)
 `UpdateMonitorHotkeys()` registers `Ctrl+Alt+1` through `Ctrl+Alt+9` based on the number of connected monitors (from `GetAllMonitors`). Called at startup and on every topology change (`TIMER_REBUILD`), as well as after `SetExclusiveMonitor`, `RestoreOriginal`, and before `ShowContextMenu`. Old hotkeys are unregistered before registering new ones. Hotkeys bypass the confirmation dialog and call `SetExclusiveMonitor` directly.
+
+### Hotkey Toggle
+`g_hotkeysEnabled` controls whether hotkeys are registered. When toggled via `IDM_TOGGLE_HOTKEYS`, all hotkeys are unregistered first (`UnregisterHotkeys()`), then conditionally re-registered based on the new state. Balloon notifications provide immediate feedback to the user.
 
 ### Balloon Notifications
 `ShowBalloon()` cancels any pending balloon (sends empty `szInfo`) before displaying a new one, preventing balloon queuing when rapidly toggling features. A one-shot timer (`TIMER_CLOSE_BALLOON`, 5 seconds) automatically dismisses the balloon. Uses `NIIF_USER | NIIF_LARGE_ICON` with the application icon.

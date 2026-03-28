@@ -50,6 +50,7 @@ HDR: LG ULTRAGEAR [ON]
 ───────────────────────────
 Restore original config
 ───────────────────────────
+✓ Hotkeys enabled
 ✓ Start with Windows
 Exit
 ```
@@ -67,6 +68,7 @@ When multiple monitors are active (extend/clone mode):
 - **Refresh Rate** — Submenu with available rates for the current resolution.
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
 - **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
+- **Hotkeys enabled** — Toggle to enable/disable all global hotkeys. When disabled, all Ctrl+Alt shortcuts are unregistered. Balloon notification confirms the toggle.
 - **Start with Windows** — Toggles auto-start at logon. When enabled, writes the executable path to the Windows Run registry key (`HKCU`).
 
 ### Global Hotkeys
@@ -78,7 +80,7 @@ When multiple monitors are active (extend/clone mode):
 | `Ctrl+Alt+H` | Toggle HDR on/off for the primary monitor |
 | `Ctrl+Alt+1..9` | Switch directly to monitor (no confirmation dialog) |
 
-These hotkeys are essential when working with a single monitor — the tray icon may not be visible on a secondary screen, but the hotkeys always work.
+These hotkeys are essential when working with a single monitor — the tray icon may not be visible on a secondary screen, but the hotkeys always work. Use the "Hotkeys enabled" toggle in the menu to disable them if they conflict with other software.
 
 ## How It Works
 
