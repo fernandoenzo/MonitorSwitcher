@@ -11,7 +11,7 @@
 ## File Structure
 
 ```
-MonitorSwitcher.c         # Native Win32 C implementation (~1740 lines)
+MonitorSwitcher.c         # Native Win32 C implementation
 MonitorSwitcher.rc        # Windows resource script (embeds the .ico into the .exe)
 MonitorSwitcher.ico       # Application icon
 Makefile                  # Cross-compilation with MinGW-w64 from Linux
@@ -36,7 +36,7 @@ make
 make clean
 ```
 
-This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon embedded as a resource. The Makefile links against `-lshell32 -luser32 -lkernel32 -ladvapi32` (advapi32 is needed for registry APIs used by HDR).
+This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon embedded as a resource. The Makefile links against `-lshell32 -luser32 -lkernel32 -ladvapi32` (advapi32 is needed for registry APIs used by HDR and auto-start).
 
 ## Testing
 
@@ -92,9 +92,19 @@ WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
 - `IDM_FREQ_BASE` (3000+) — frequency values
 - `IDM_HDR_BASE` (4000+) — HDR monitor targetIds
 
-### Monitor Enumeration (Two-Phase)
+### Monitor Enumeration (Three-Phase)
 1. **Phase 1:** `QDC_ONLY_ACTIVE_PATHS` — get current GDI name, resolution, frequency for active targets
-2. **Phase 2:** `QDC_ALL_PATHS` — discover all connected targets (including inactive) with friendly names and device paths
+2. **Phase 2:** `QDC_ALL_PATHS` — discover all connected targets (including inactive) with friendly names and device paths. Ghost targets (empty `monitorFriendlyDeviceName`) are filtered out.
+3. **Phase 3:** Sort by Adapter LUID + Target ID via `qsort` to mirror Windows Settings numbering (port-centric order).
+
+### Monitor Ordering (Port-Centric)
+Monitors are sorted by `{luidHigh, luidLow, targetId}` — this replicates the exact order shown in Windows Settings. The order is tied to the physical GPU port, not the monitor itself: swapping cables between two monitors swaps their numbers (same as Windows). This is deterministic and stable across topology changes.
+
+### Dynamic Hotkeys (Ctrl+Alt+1..9)
+`UpdateMonitorHotkeys()` registers `Ctrl+Alt+1` through `Ctrl+Alt+9` based on the number of connected monitors (from `GetAllMonitors`). Called at startup and on every topology change (`TIMER_REBUILD`), as well as after `SetExclusiveMonitor`, `RestoreOriginal`, and before `ShowContextMenu`. Old hotkeys are unregistered before registering new ones. Hotkeys bypass the confirmation dialog and call `SetExclusiveMonitor` directly.
+
+### Balloon Notifications
+`ShowBalloon()` cancels any pending balloon (sends empty `szInfo`) before displaying a new one, preventing balloon queuing when rapidly toggling features. A one-shot timer (`TIMER_CLOSE_BALLOON`, 5 seconds) automatically dismisses the balloon. Uses `NIIF_USER | NIIF_LARGE_ICON` with the application icon.
 
 ### Exclusive Mode (Three-Attempt Strategy)
 Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply topology:
@@ -134,6 +144,8 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - The `Sleep(2000)` in `ExitHandler` is the only blocking sleep in the program. It is acceptable because the app is about to terminate.
 - `WM_DISPLAYCHANGE` is debounced with a 2-second one-shot timer (`TIMER_REBUILD`) to let Windows settle after topology changes.
 - Balloon notifications via `Shell_NotifyIconW` + `NIF_INFO` integrate automatically with the Windows 10/11 notification center.
+- `ShowBalloon()` cancels any pending balloon before showing a new one, preventing queuing when rapidly toggling features (e.g. HDR ON/OFF).
+- `TIMER_CLOSE_BALLOON` (5 seconds) auto-dismisses balloons. Without this, Windows controls the duration (5-25 seconds depending on accessibility settings).
 - The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry` and the auto-start feature.
 - `WINVER` and `_WIN32_WINNT` must be defined as `0x0601` (Windows 7+) before `#include <windows.h>` for the DISPLAYCONFIG types to be available in MinGW-w64 headers.
 

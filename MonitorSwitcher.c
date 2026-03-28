@@ -26,7 +26,7 @@
 
 /* Timer IDs */
 #define TIMER_REBUILD         1 /* One-shot 2000ms debounce for WM_DISPLAYCHANGE */
-#define TIMER_CLOSE_BALLOON   2 /* One-shot 2000ms auto-close for balloon notifications */
+#define TIMER_CLOSE_BALLOON   2 /* One-shot 5000ms auto-close for balloon notifications */
 
 /* Custom window message for system tray icon events */
 #define WM_TRAYICON        (WM_APP + 1)
@@ -275,7 +275,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             UpdateMonitorHotkeys();
             break;
         case TIMER_CLOSE_BALLOON:
-            /* One-shot timer: dismiss the balloon notification after 2000ms */
+            /* One-shot timer: dismiss the balloon notification after 5000ms */
             KillTimer(hwnd, TIMER_CLOSE_BALLOON);
             g_nid.uFlags = NIF_INFO;
             g_nid.szInfo[0] = L'\0';
@@ -801,7 +801,7 @@ static void SaveActiveConfigToDatabase(void)
 }
 
 /*
- * Restores the display topology saved before entering exclusive mode.
+ * Restores the display topology saved at startup.
  * Queries fresh paths from QDC_ALL_PATHS and activates those matching
  * the saved {targetId, sourceId} pairs — preserving extend vs duplicate
  * layout and primary monitor order.
@@ -1706,7 +1706,7 @@ static void UpdateTooltip(void)
 /*
  * Shows a balloon notification from the tray icon.
  * Cancels any pending balloon first, then displays the new one
- * and schedules automatic dismissal after 2 seconds.
+ * and schedules automatic dismissal after 5 seconds.
  * Integrates with Windows notification center automatically.
  */
 static void ShowBalloon(const WCHAR *title, const WCHAR *text)
@@ -1824,12 +1824,12 @@ static void CleanExit(void)
     UnregisterHotKey(g_hwndMain, HOTKEY_RESTORE);
     UnregisterHotKey(g_hwndMain, HOTKEY_MENU);
     UnregisterHotKey(g_hwndMain, HOTKEY_HDR);
-    
+
     int i;
     for (i = 0; i < g_hotkeyMonitorCount; i++) {
         UnregisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i);
     }
-    
+
     RemoveTrayIcon();
     DestroyWindow(g_hwndMain);
 }
