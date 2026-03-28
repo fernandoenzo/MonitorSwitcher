@@ -25,7 +25,8 @@
 #define MAX_FREQUENCIES   32
 
 /* Timer IDs */
-#define TIMER_REBUILD      1    /* One-shot 2000ms debounce for WM_DISPLAYCHANGE */
+#define TIMER_REBUILD         1 /* One-shot 2000ms debounce for WM_DISPLAYCHANGE */
+#define TIMER_CLOSE_BALLOON   2 /* One-shot 2000ms auto-close for balloon notifications */
 
 /* Custom window message for system tray icon events */
 #define WM_TRAYICON        (WM_APP + 1)
@@ -272,6 +273,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             KillTimer(hwnd, TIMER_REBUILD);
             UpdateTooltip();
             UpdateMonitorHotkeys();
+            break;
+        case TIMER_CLOSE_BALLOON:
+            /* One-shot timer: dismiss the balloon notification after 2000ms */
+            KillTimer(hwnd, TIMER_CLOSE_BALLOON);
+            g_nid.uFlags = NIF_INFO;
+            g_nid.szInfo[0] = L'\0';
+            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
             break;
         }
         return 0;
@@ -1697,11 +1705,19 @@ static void UpdateTooltip(void)
 
 /*
  * Shows a balloon notification from the tray icon.
- * Integrates with Windows 11 notification center automatically.
+ * Cancels any pending balloon first, then displays the new one
+ * and schedules automatic dismissal after 2 seconds.
+ * Integrates with Windows notification center automatically.
  */
 static void ShowBalloon(const WCHAR *title, const WCHAR *text)
 {
-    g_nid.uFlags       = NIF_INFO;
+    /* Cancel any pending balloon and its timer */
+    g_nid.uFlags = NIF_INFO;
+    g_nid.szInfo[0] = L'\0';
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    KillTimer(g_hwndMain, TIMER_CLOSE_BALLOON);
+
+    /* Show the new balloon */
     g_nid.dwInfoFlags  = NIIF_USER | NIIF_LARGE_ICON;
     g_nid.hBalloonIcon = g_hIcon;
     lstrcpynW(g_nid.szInfoTitle, title,
@@ -1709,6 +1725,9 @@ static void ShowBalloon(const WCHAR *title, const WCHAR *text)
     lstrcpynW(g_nid.szInfo, text,
               sizeof(g_nid.szInfo) / sizeof(WCHAR));
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+
+    /* Schedule auto-dismiss after 5 seconds */
+    SetTimer(g_hwndMain, TIMER_CLOSE_BALLOON, 5000, NULL);
 }
 
 /* ─── Hotkeys ───────────────────────────────────────────────────────── */
@@ -1801,6 +1820,7 @@ static void SetAutoStart(BOOL enable)
 static void CleanExit(void)
 {
     KillTimer(g_hwndMain, TIMER_REBUILD);
+    KillTimer(g_hwndMain, TIMER_CLOSE_BALLOON);
     UnregisterHotKey(g_hwndMain, HOTKEY_RESTORE);
     UnregisterHotKey(g_hwndMain, HOTKEY_MENU);
     UnregisterHotKey(g_hwndMain, HOTKEY_HDR);
