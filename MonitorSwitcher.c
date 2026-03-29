@@ -13,6 +13,7 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <wininet.h>
 
 /* ─── Constants ─────────────────────────────────────────────────────── */
 
@@ -30,6 +31,7 @@
 
 /* Custom window message for system tray icon events */
 #define WM_TRAYICON        (WM_APP + 1)
+#define WM_UPDATE_CHECK_DONE (WM_APP + 2)
 
 /* Menu item ID ranges — spaced apart for safe indexing */
 #define IDM_MONITOR_BASE   1000   /* 1000 .. 1000+MAX_MONITORS-1  */
@@ -40,6 +42,17 @@
 #define IDM_AUTOSTART      5001
 #define IDM_EXIT           5002
 #define IDM_TOGGLE_HOTKEYS 5003
+#define IDM_CHECK_UPDATE   5004
+
+typedef enum {
+    UPDATE_UNKNOWN,
+    UPDATE_CHECKING,
+    UPDATE_AVAILABLE,
+    UPDATE_LATEST
+} UpdateState;
+
+static UpdateState g_updateState = UPDATE_UNKNOWN;
+static WCHAR g_updateVersion[32] = {0};
 
 /* Registry key and value for auto-start with Windows */
 #define AUTOSTART_KEY      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
@@ -141,6 +154,7 @@ static DISPLAYCONFIG_MODE_INFO g_modeBuf[MAX_MODES];
 /* ─── Forward Declarations ──────────────────────────────────────────── */
 
 static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+static DWORD WINAPI CheckUpdateThread(LPVOID);
 
 /* DisplayConfig helpers */
 static int  GetAllMonitors(MonitorInfo *monitors, int maxMonitors);
@@ -241,6 +255,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     SetupTrayIcon();
 
+    /* Automatically check for updates silently at startup */
+    CreateThread(NULL, 0, CheckUpdateThread, (LPVOID)FALSE, 0, NULL);
+
     /* Snapshot the current topology so we can restore it later */
     SaveConfig();
 
@@ -272,6 +289,56 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     CloseHandle(hMutex);
     return (int)msg.wParam;
+}
+
+/* ─── Update Checker ────────────────────────────────────────────────── */
+
+static DWORD WINAPI CheckUpdateThread(LPVOID lpParam)
+{
+    BOOL isManual = (BOOL)(UINT_PTR)lpParam;
+    int status = -1;
+
+    HINTERNET hSession = InternetOpenW(L"MonitorSwitcher", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (hSession) {
+        DWORD timeout = 5000;
+        InternetSetOptionW(hSession, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+        InternetSetOptionW(hSession, INTERNET_OPTION_SEND_TIMEOUT,    &timeout, sizeof(timeout));
+        InternetSetOptionW(hSession, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+
+        HINTERNET hConnect = InternetConnectW(hSession, L"github.com", INTERNET_DEFAULT_HTTPS_PORT,
+                                              NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+        if (hConnect) {
+            HINTERNET hReq = HttpOpenRequestW(hConnect, L"HEAD",
+                                              L"/fernandoenzo/MonitorSwitcher/releases/latest",
+                                              NULL, NULL, NULL,
+                                              INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+            if (hReq) {
+                if (HttpSendRequestW(hReq, NULL, 0, NULL, 0)) {
+                    WCHAR szUrl[512] = {0};
+                    DWORD dwSize = sizeof(szUrl);
+                    if (InternetQueryOptionW(hReq, INTERNET_OPTION_URL, szUrl, &dwSize)) {
+                        WCHAR *pTag = wcsrchr(szUrl, L'/');
+                        if (pTag) {
+                            pTag++;
+                            if (*pTag == L'v' || *pTag == L'V') pTag++;
+                            if (lstrcmpW(pTag, VERSION_STRING) != 0) {
+                                status = 1;
+                                lstrcpynW(g_updateVersion, pTag, ARRAYSIZE(g_updateVersion));
+                            } else {
+                                status = 0;
+                            }
+                        }
+                    }
+                }
+                InternetCloseHandle(hReq);
+            }
+            InternetCloseHandle(hConnect);
+        }
+        InternetCloseHandle(hSession);
+    }
+
+    PostMessageW(g_hwndMain, WM_UPDATE_CHECK_DONE, (WPARAM)status, (LPARAM)isManual);
+    return 0;
 }
 
 /* ─── Main Window Procedure ─────────────────────────────────────────── */
@@ -353,6 +420,25 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
         }
         return 0;
 
+    case WM_UPDATE_CHECK_DONE: {
+        int status = (int)wParam;
+        BOOL isManual = (BOOL)lParam;
+        
+        if (status == 1) {
+            g_updateState = UPDATE_AVAILABLE;
+            WCHAR msg[128];
+            wsprintfW(msg, L"Update to v%s available!", g_updateVersion);
+            ShowBalloon(L"MonitorSwitcher Update", msg);
+        } else if (status == 0) {
+            g_updateState = UPDATE_LATEST;
+            if (isManual) ShowBalloon(L"MonitorSwitcher Update", L"MonitorSwitcher is up to date.");
+        } else {
+            g_updateState = UPDATE_UNKNOWN;
+            if (isManual) ShowBalloon(L"MonitorSwitcher Update", L"Failed to check for updates.");
+        }
+        return 0;
+    }
+
     case WM_COMMAND: {
         int id = (int)LOWORD(wParam);
         if (id >= IDM_MONITOR_BASE
@@ -386,6 +472,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             } else {
                 ShowBalloon(L"Hotkeys disabled",
                             L"All hotkeys have been unregistered");
+            }
+        } else if (id == IDM_CHECK_UPDATE) {
+            if (g_updateState == UPDATE_AVAILABLE) {
+                ShellExecuteW(NULL, L"open", L"https://github.com/fernandoenzo/MonitorSwitcher/releases/latest", NULL, NULL, SW_SHOWNORMAL);
+            } else if (g_updateState != UPDATE_CHECKING) {
+                g_updateState = UPDATE_CHECKING;
+                ShowBalloon(L"MonitorSwitcher Update", L"Checking for updates...");
+                CreateThread(NULL, 0, CheckUpdateThread, (LPVOID)TRUE, 0, NULL);
             }
         } else if (id == IDM_EXIT) {
             ExitHandler();
@@ -1659,6 +1753,20 @@ static void ShowContextMenu(void)
     }
     AppendMenuW(hMenu, MF_STRING | (IsAutoStartEnabled() ? MF_CHECKED : MF_UNCHECKED),
                 IDM_AUTOSTART, L"Start with Windows");
+
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    if (g_updateState == UPDATE_AVAILABLE) {
+        WCHAR msg[128];
+        wsprintfW(msg, L"\x2B50 Update to v%s available!", g_updateVersion); /* Star emoji fallback or use "Update to..." */
+        AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, msg);
+    } else if (g_updateState == UPDATE_CHECKING) {
+        AppendMenuW(hMenu, MF_STRING | MF_GRAYED | MF_DISABLED, IDM_CHECK_UPDATE, L"Checking for updates...");
+    } else if (g_updateState == UPDATE_LATEST) {
+        AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, L"Check for updates (Up to date)");
+    } else {
+        AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, L"Check for updates");
+    }
+
     AppendMenuW(hMenu, MF_STRING, IDM_EXIT, L"Exit");
 
     /*
