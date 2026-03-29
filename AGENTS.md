@@ -81,6 +81,14 @@ No automated test framework. Manual testing required:
 - `CreateMutexW` — enforces single instance
 - `MessageBoxW` — confirmation dialogs and error messages
 
+### WinINet (Update Checker)
+- `InternetOpenW` — initialize WinINet session with 5000ms timeout
+- `InternetConnectW` — connect to github.com over HTTPS
+- `HttpOpenRequestW` — create HEAD request to `/releases/latest` with cache-bypass flags
+- `HttpAddRequestHeadersW` — add `Cache-Control: no-cache` header
+- `HttpSendRequestW` — send request and follow redirect
+- `InternetQueryOptionW` — get final URL after redirect (extracts version tag)
+
 ## Architecture
 
 ### State Management
@@ -129,6 +137,13 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - `ChangeResolution` tries to preserve the current refresh rate; falls back to highest available.
 - Functions always get the GDI name fresh via `GetActiveGdiName()` — never from cached/closure values.
 
+### Update Checker
+- `CheckUpdateThread` runs in a background thread (`CreateThread`) spawned after `SetupTrayIcon()` in `wWinMain`. Uses WinINet with 5000ms timeout for all network operations.
+- HEAD request to `https://github.com/fernandoenzo/MonitorSwitcher/releases/latest`, follows redirect, extracts version tag from final URL (e.g., `/releases/tag/1.7.1` → `1.7.1`), compares with `VERSION_STRING`.
+- Posts `WM_UPDATE_CHECK_DONE` to main window. State machine: `UPDATE_UNKNOWN` → `UPDATE_CHECKING` → `UPDATE_AVAILABLE` or `UPDATE_LATEST`.
+- Silent on startup (only notifies if update available). Manual check via menu item shows balloon regardless.
+- Cache prevention: `INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE` plus `Cache-Control: no-cache` header ensures fresh responses from GitHub.
+
 ## Conventions
 
 - All code comments and documentation must be written in **English**.
@@ -143,7 +158,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - No heap allocation — all stack locals and static globals.
 - All git commits must be **signed** (`git commit -S`).
 - Git tags must be **lightweight** (`git tag 1.6`), not annotated or signed.
-- When elaborating complex plans with the user, save them to a temporary text file (e.g., `plan.md`) to ensure they survive conversation compressions. These files must be deleted before making a git commit and should never be tracked in the repository.
+- When elaborating plans with the user, ALWAYS save them to a temporary text file (e.g., `plan.md`) in the project root directory to ensure they survive conversation compressions. Iterate on this file throughout the conversation as the plan evolves. The AI agent has full permission to create, modify, and delete this file even in plan-only mode — this is the only exception to the read-only constraint. This file should never be tracked in the repository. After executing the plan, ALWAYS ask the user for permission to delete the file.
 
 ## Important Technical Details
 
