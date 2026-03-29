@@ -12,8 +12,9 @@
 
 ```
 MonitorSwitcher.c         # Native Win32 C implementation
-MonitorSwitcher.rc        # Windows resource script (embeds the .ico into the .exe)
-MonitorSwitcher.ico       # Application icon
+MonitorSwitcher.rc        # Windows resource script (embeds icon and manifest into the .exe)
+MonitorSwitcher.manifest  # Application manifest (Per-Monitor DPI awareness)
+MonitorSwitcher.ico       # Application icon (multi-resolution: 256, 48, 32, 16)
 Makefile                  # Cross-compilation with MinGW-w64 from Linux
 README.md                 # Full documentation
 AGENTS.md                 # AI agent coding guidelines
@@ -36,7 +37,7 @@ make
 make clean
 ```
 
-This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon embedded as a resource. The Makefile links against `-lshell32 -luser32 -lkernel32 -ladvapi32` (advapi32 is needed for registry APIs used by HDR and auto-start).
+This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon and manifest embedded as resources. The Makefile links against `-lshell32 -luser32 -lkernel32 -ladvapi32 -lwininet` (advapi32 is needed for registry APIs used by HDR and auto-start).
 
 The Makefile defines `VERSION` using `git describe --tags --dirty` with fallback to `dev` for builds outside a git repository. The version is passed to the compiler via `-DVERSION_STRING`.
 

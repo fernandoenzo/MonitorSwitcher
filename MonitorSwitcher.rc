@@ -1,2 +1,3 @@
-/* MonitorSwitcher resource script — embeds the application icon */
+/* MonitorSwitcher resource script — embeds icon and application manifest */
 1 ICON "MonitorSwitcher.ico"
+1 24   "MonitorSwitcher.manifest"
