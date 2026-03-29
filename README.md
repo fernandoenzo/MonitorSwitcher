@@ -28,6 +28,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 - **One-click restore** — Return to your original multi-monitor layout at any time.
 - **Start with Windows** — Optional auto-start via the tray menu (writes to `HKCU\...\Run`, no admin required).
 - **Emergency hotkeys** — Global shortcuts work from any screen, even when the taskbar isn't visible.
+- **Automatic update checker** — Checks GitHub releases on startup for new versions. Silent if up-to-date; shows a balloon notification when an update is available. Manual check available via tray menu ("Check for updates").
 
 ## Usage
 
@@ -38,7 +39,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 3. Right-click the tray icon to access all features:
 
 ```
-MonitorSwitcher 1.5.1
+MonitorSwitcher 1.7.1
 ───────────────────────────
 ★  1. LG ULTRAGEAR  |  1920x1080 @ 144Hz
    2. LG Dummy Plug  (off)
@@ -52,6 +53,8 @@ Restore original config
 ───────────────────────────
 ✓ Hotkeys enabled
 ✓ Start with Windows
+───────────────────────────
+Check for updates (latest)
 Exit
 ```
 
@@ -70,6 +73,7 @@ When multiple monitors are active (extend/clone mode):
 - **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
 - **Hotkeys enabled** — Toggle to enable/disable all global hotkeys. When disabled, all Ctrl+Alt shortcuts are unregistered. Balloon notification confirms the toggle.
 - **Start with Windows** — Toggles auto-start at logon. When enabled, writes the executable path to the Windows Run registry key (`HKCU`).
+- **Check for updates** — Manually check for new versions on GitHub. Shows a balloon notification with the result. On startup, checks silently and only notifies if an update is available.
 
 ### Global Hotkeys
 
@@ -107,7 +111,7 @@ sudo apt install build-essential mingw-w64
 make clean && make
 ```
 
-This produces `MonitorSwitcher.exe`, a standalone Windows executable with the application icon embedded as a resource.
+This produces `MonitorSwitcher.exe`, a standalone Windows executable with the icon and manifest embedded as resources.
 
 The version string is automatically extracted from git tags using `git describe --tags --dirty`. To release a new version, simply create a new tag — no code changes needed. The `-dirty` suffix indicates uncommitted changes in the working tree.
 
