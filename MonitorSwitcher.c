@@ -67,6 +67,28 @@
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
+/*
+ * Uniquely identifies a monitor across different adapters.
+ * TargetId is scoped per-adapter, so (adapterLUID, targetId) is required
+ * for global uniqueness.
+ */
+typedef struct {
+    UINT32 targetId;
+    UINT32 luidLow;
+    UINT32 luidHigh;
+} MonitorIdentity;
+
+/*
+ * Saved topology entry for restore. Primary monitor first.
+ * Includes adapter LUID for unambiguous identification.
+ */
+typedef struct {
+    UINT32 targetId;
+    UINT32 sourceId;
+    UINT32 luidLow;
+    UINT32 luidHigh;
+} TopologyEntry;
+
 typedef struct {
     UINT32 targetId;
     WCHAR  name[64];
@@ -79,11 +101,6 @@ typedef struct {
     UINT32 h;
     UINT32 freq;
 } MonitorInfo;
-
-typedef struct {
-    UINT32 targetId;
-    UINT32 sourceId;
-} TopologyEntry;
 
 typedef struct {
     UINT32 w;
@@ -108,14 +125,14 @@ static BOOL             g_hotkeysEnabled      = TRUE;
 static int              g_hotkeyMonitorCount   = 0;
 
 /* Menu callback lookup tables — filled by ShowContextMenu, read by WM_COMMAND */
-static UINT32           g_menuMonitorIds[MAX_MONITORS];
+static MonitorIdentity  g_menuMonitors[MAX_MONITORS];
 static int              g_menuMonitorCount     = 0;
 static ResolutionEntry  g_menuResolutions[MAX_RESOLUTIONS];
 static int              g_menuResCount         = 0;
 static UINT32           g_menuFreqs[MAX_FREQUENCIES];
 static int              g_menuFreqCount        = 0;
-static UINT32           g_menuHdrIds[MAX_MONITORS];
-static int              g_menuHdrCount         = 0;
+static MonitorIdentity  g_menuHdr[MAX_MONITORS];
+static int              g_menuHdrCount        = 0;
 
 /* Shared buffers for QueryDisplayConfig — never used recursively */
 static DISPLAYCONFIG_PATH_INFO g_pathBuf[MAX_PATHS];
@@ -134,9 +151,10 @@ static BOOL GetCurrentMode(const WCHAR *gdiName,
 /* Exclusive mode */
 static void SaveConfig(void);
 static BOOL IsTopologyChanged(void);
-static void SetExclusiveMonitor(UINT32 targetId);
+static void SetExclusiveMonitor(MonitorIdentity mon);
 static void SaveActiveConfigToDatabase(void);
 static void RestoreOriginal(void);
+static void ConfirmSwitch(MonitorIdentity mon);
 
 /* Resolution / refresh rate */
 static int  GetAvailableResolutions(const WCHAR *gdiName,
@@ -152,12 +170,11 @@ static void ApplyMode(const WCHAR *gdiName,
 /* HDR */
 static BOOL ReadHdrFromRegistry(const WCHAR *devPath, BOOL *enabled);
 static BOOL IsHdrSupported(UINT32 luidLow, UINT32 luidHigh, UINT32 targetId);
-static void ToggleHdr(UINT32 targetId);
+static void ToggleHdr(MonitorIdentity mon);
 static void ToggleHdrPrimary(void);
 
 /* Tray menu */
 static void ShowContextMenu(void);
-static void ConfirmSwitch(UINT32 targetId);
 
 /* Exit */
 static void ExitHandler(void);
@@ -309,7 +326,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             MonitorInfo monitors[MAX_MONITORS];
             int monCount = GetAllMonitors(monitors, MAX_MONITORS);
             if (index < monCount) {
-                SetExclusiveMonitor(monitors[index].targetId);
+                MonitorIdentity mon;
+                mon.targetId = monitors[index].targetId;
+                mon.luidLow = monitors[index].luidLow;
+                mon.luidHigh = monitors[index].luidHigh;
+                SetExclusiveMonitor(mon);
             }
             return 0;
         }
@@ -336,7 +357,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
         int id = (int)LOWORD(wParam);
         if (id >= IDM_MONITOR_BASE
             && id < IDM_MONITOR_BASE + g_menuMonitorCount) {
-            ConfirmSwitch(g_menuMonitorIds[id - IDM_MONITOR_BASE]);
+            ConfirmSwitch(g_menuMonitors[id - IDM_MONITOR_BASE]);
         } else if (id >= IDM_RES_BASE
                    && id < IDM_RES_BASE + g_menuResCount) {
             int idx = id - IDM_RES_BASE;
@@ -347,7 +368,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             ChangeFrequency(g_menuFreqs[id - IDM_FREQ_BASE]);
         } else if (id >= IDM_HDR_BASE
                    && id < IDM_HDR_BASE + g_menuHdrCount) {
-            ToggleHdr(g_menuHdrIds[id - IDM_HDR_BASE]);
+            ToggleHdr(g_menuHdr[id - IDM_HDR_BASE]);
         } else if (id == IDM_RESTORE) {
             RestoreOriginal();
         } else if (id == IDM_AUTOSTART) {
@@ -648,7 +669,7 @@ static BOOL IsTopologyChanged(void)
     if ((int)pc != g_originalTopologyCount)
         return TRUE;
 
-    /* Check if all {targetId, sourceId} pairs match */
+    /* Check if all {targetId, sourceId, luid} tuples match */
     UINT32 i;
     for (i = 0; i < pc; i++) {
         BOOL found = FALSE;
@@ -657,7 +678,11 @@ static BOOL IsTopologyChanged(void)
             if (g_pathBuf[i].targetInfo.id
                     == g_originalTopology[j].targetId
                 && g_pathBuf[i].sourceInfo.id
-                    == g_originalTopology[j].sourceId) {
+                    == g_originalTopology[j].sourceId
+                && g_pathBuf[i].targetInfo.adapterId.LowPart
+                    == g_originalTopology[j].luidLow
+                && (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart
+                    == g_originalTopology[j].luidHigh) {
                 found = TRUE;
                 break;
             }
@@ -671,7 +696,7 @@ static BOOL IsTopologyChanged(void)
 
 /*
  * Snapshots the current active display topology (primary monitor first).
- * Only stores {targetId, sourceId} pairs — not full paths or modes.
+ * Stores {targetId, sourceId, luidLow, luidHigh} tuples for unambiguous identification.
  * Paths and modes are queried fresh on restore; only topology is saved.
  */
 static void SaveConfig(void)
@@ -697,6 +722,10 @@ static void SaveConfig(void)
             g_pathBuf[i].targetInfo.id;
         g_originalTopology[g_originalTopologyCount].sourceId =
             g_pathBuf[i].sourceInfo.id;
+        g_originalTopology[g_originalTopologyCount].luidLow =
+            g_pathBuf[i].targetInfo.adapterId.LowPart;
+        g_originalTopology[g_originalTopologyCount].luidHigh =
+            (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
         g_originalTopologyCount++;
     }
 }
@@ -709,7 +738,7 @@ static void SaveConfig(void)
  *   2) SDC_USE_SUPPLIED_DISPLAY_CONFIG — strict, no changes allowed.
  *   3) SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES — last resort.
  */
-static void SetExclusiveMonitor(UINT32 targetId)
+static void SetExclusiveMonitor(MonitorIdentity mon)
 {
     g_selfChanging = TRUE;
 
@@ -733,7 +762,16 @@ static void SetExclusiveMonitor(UINT32 targetId)
     BOOL found = FALSE;
     UINT32 i;
     for (i = 0; i < pc; i++) {
-        if (g_pathBuf[i].targetInfo.id != targetId)
+        /* Match by both targetId and adapter LUID for unambiguous identification */
+        if (g_pathBuf[i].targetInfo.id != mon.targetId)
+            continue;
+        if (g_pathBuf[i].targetInfo.adapterId.LowPart != mon.luidLow)
+            continue;
+        if ((UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart != mon.luidHigh)
+            continue;
+
+        /* Skip paths where the target is not available (ghost/unconnected) */
+        if (!g_pathBuf[i].targetInfo.targetAvailable)
             continue;
 
         /* Copy this single path and configure it as the only active one */
@@ -770,7 +808,7 @@ static void SetExclusiveMonitor(UINT32 targetId)
             tgtName.header.type  = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
             tgtName.header.size  = sizeof(tgtName);
             tgtName.header.adapterId = singlePath.targetInfo.adapterId;
-            tgtName.header.id    = targetId;
+            tgtName.header.id    = mon.targetId;
 
             WCHAR balloonMsg[128];
             if (DisplayConfigGetDeviceInfo(&tgtName.header) == ERROR_SUCCESS
@@ -778,7 +816,7 @@ static void SetExclusiveMonitor(UINT32 targetId)
                 wsprintfW(balloonMsg, L"Switched to %ls",
                           tgtName.monitorFriendlyDeviceName);
             } else {
-                wsprintfW(balloonMsg, L"Switched to monitor %u", targetId);
+                wsprintfW(balloonMsg, L"Switched to monitor %u", mon.targetId);
             }
             ShowBalloon(L"MonitorSwitcher", balloonMsg);
         }
@@ -791,7 +829,7 @@ static void SetExclusiveMonitor(UINT32 targetId)
 
     if (!found) {
         WCHAR errMsg[128];
-        wsprintfW(errMsg, L"Target %u not found.", targetId);
+        wsprintfW(errMsg, L"Target %u not found on adapter.", mon.targetId);
         MessageBoxW(NULL, errMsg, L"MonitorSwitcher",
                     MB_OK | MB_ICONWARNING);
         return;
@@ -827,8 +865,8 @@ static void SaveActiveConfigToDatabase(void)
 /*
  * Restores the display topology saved at startup.
  * Queries fresh paths from QDC_ALL_PATHS and activates those matching
- * the saved {targetId, sourceId} pairs — preserving extend vs duplicate
- * layout and primary monitor order.
+ * the saved {targetId, sourceId, luidLow, luidHigh} tuples — preserving
+ * extend vs duplicate layout and primary monitor order.
  */
 static void RestoreOriginal(void)
 {
@@ -865,11 +903,13 @@ static void RestoreOriginal(void)
     }
 
     /*
-     * For each queried path, check if its {targetId, sourceId} matches
+     * For each queried path, check if its {targetId, sourceId, luid} matches
      * a saved topology entry.  Store the matching path buffer index.
      */
     UINT32 foundTgtIds[MAX_TOPOLOGY];
     UINT32 foundSrcIds[MAX_TOPOLOGY];
+    UINT32 foundLuidLows[MAX_TOPOLOGY];
+    UINT32 foundLuidHighs[MAX_TOPOLOGY];
     UINT32 foundIdx[MAX_TOPOLOGY];       /* index into g_pathBuf */
     int    foundCount = 0;
 
@@ -877,12 +917,17 @@ static void RestoreOriginal(void)
     for (i = 0; i < pc; i++) {
         UINT32 tgtId = g_pathBuf[i].targetInfo.id;
         UINT32 srcId = g_pathBuf[i].sourceInfo.id;
+        UINT32 luidLow = g_pathBuf[i].targetInfo.adapterId.LowPart;
+        UINT32 luidHigh = (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
 
-        /* Skip if this pair was already found */
+        /* Skip if this tuple was already found */
         BOOL already = FALSE;
         int j;
         for (j = 0; j < foundCount; j++) {
-            if (foundTgtIds[j] == tgtId && foundSrcIds[j] == srcId) {
+            if (foundTgtIds[j] == tgtId
+                && foundSrcIds[j] == srcId
+                && foundLuidLows[j] == luidLow
+                && foundLuidHighs[j] == luidHigh) {
                 already = TRUE;
                 break;
             }
@@ -892,10 +937,14 @@ static void RestoreOriginal(void)
         /* Check against saved topology */
         for (j = 0; j < g_originalTopologyCount; j++) {
             if (tgtId == g_originalTopology[j].targetId
-                && srcId == g_originalTopology[j].sourceId) {
+                && srcId == g_originalTopology[j].sourceId
+                && luidLow == g_originalTopology[j].luidLow
+                && luidHigh == g_originalTopology[j].luidHigh) {
                 if (foundCount < MAX_TOPOLOGY) {
                     foundTgtIds[foundCount] = tgtId;
                     foundSrcIds[foundCount] = srcId;
+                    foundLuidLows[foundCount] = luidLow;
+                    foundLuidHighs[foundCount] = luidHigh;
                     foundIdx[foundCount]    = i;
                     foundCount++;
                 }
@@ -925,7 +974,9 @@ static void RestoreOriginal(void)
         int k;
         for (k = 0; k < foundCount; k++) {
             if (foundTgtIds[k] == g_originalTopology[s].targetId
-                && foundSrcIds[k] == g_originalTopology[s].sourceId) {
+                && foundSrcIds[k] == g_originalTopology[s].sourceId
+                && foundLuidLows[k] == g_originalTopology[s].luidLow
+                && foundLuidHighs[k] == g_originalTopology[s].luidHigh) {
                 restorePaths[restoreCount] = g_pathBuf[foundIdx[k]];
                 restorePaths[restoreCount].flags =
                     DISPLAYCONFIG_PATH_ACTIVE;
@@ -1295,37 +1346,40 @@ static BOOL IsHdrSupported(UINT32 luidLow, UINT32 luidHigh,
  *   5. DisplayConfigSetDeviceInfo (type 10) to write new state
  *   6. Show balloon notification with result
  */
-static void ToggleHdr(UINT32 targetId)
+static void ToggleHdr(MonitorIdentity mon)
 {
     MonitorInfo monitors[MAX_MONITORS];
     int monCount = GetAllMonitors(monitors, MAX_MONITORS);
 
-    MonitorInfo *mon = NULL;
+    /* Find the full MonitorInfo by identity (need devPath for registry lookup) */
+    MonitorInfo *fullInfo = NULL;
     int i;
     for (i = 0; i < monCount; i++) {
-        if (monitors[i].targetId == targetId) {
-            mon = &monitors[i];
+        if (monitors[i].targetId == mon.targetId
+            && monitors[i].luidLow == mon.luidLow
+            && monitors[i].luidHigh == mon.luidHigh) {
+            fullInfo = &monitors[i];
             break;
         }
     }
 
-    if (!mon) {
+    if (!fullInfo) {
         ShowBalloon(L"MonitorSwitcher", L"Monitor not found");
         return;
     }
 
-    if (!IsHdrSupported(mon->luidLow, mon->luidHigh, mon->targetId)) {
+    if (!IsHdrSupported(fullInfo->luidLow, fullInfo->luidHigh, fullInfo->targetId)) {
         WCHAR msg[128];
-        wsprintfW(msg, L"%s: HDR not supported", mon->name);
+        wsprintfW(msg, L"%s: HDR not supported", fullInfo->name);
         ShowBalloon(L"MonitorSwitcher", msg);
         return;
     }
 
     BOOL currentEnabled;
-    if (!ReadHdrFromRegistry(mon->devPath, &currentEnabled)) {
+    if (!ReadHdrFromRegistry(fullInfo->devPath, &currentEnabled)) {
         WCHAR msg[128];
         wsprintfW(msg, L"%s: HDR state not found in registry",
-                  mon->name);
+                  fullInfo->name);
         ShowBalloon(L"MonitorSwitcher", msg);
         return;
     }
@@ -1338,9 +1392,9 @@ static void ToggleHdr(UINT32 targetId)
     si.header.type =
         DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE;
     si.header.size = sizeof(si);
-    si.header.adapterId.LowPart  = mon->luidLow;
-    si.header.adapterId.HighPart = (LONG)mon->luidHigh;
-    si.header.id = mon->targetId;
+    si.header.adapterId.LowPart  = fullInfo->luidLow;
+    si.header.adapterId.HighPart = (LONG)fullInfo->luidHigh;
+    si.header.id = fullInfo->targetId;
     si.enableAdvancedColor = newState ? 1 : 0;
 
     LONG ret = DisplayConfigSetDeviceInfo(&si.header);
@@ -1352,7 +1406,7 @@ static void ToggleHdr(UINT32 targetId)
     }
 
     WCHAR msg[128];
-    wsprintfW(msg, L"%s: HDR %s", mon->name,
+    wsprintfW(msg, L"%s: HDR %s", fullInfo->name,
               newState ? L"ON" : L"OFF");
     ShowBalloon(L"MonitorSwitcher", msg);
 }
@@ -1378,7 +1432,11 @@ static void ToggleHdrPrimary(void)
     for (i = 0; i < monCount; i++) {
         if (monitors[i].isActive
             && lstrcmpW(monitors[i].gdiName, gdiName) == 0) {
-            ToggleHdr(monitors[i].targetId);
+            MonitorIdentity mon;
+            mon.targetId = monitors[i].targetId;
+            mon.luidLow = monitors[i].luidLow;
+            mon.luidHigh = monitors[i].luidHigh;
+            ToggleHdr(mon);
             return;
         }
     }
@@ -1467,7 +1525,9 @@ static void ShowContextMenu(void)
         }
 
         UINT menuId = IDM_MONITOR_BASE + (UINT)g_menuMonitorCount;
-        g_menuMonitorIds[g_menuMonitorCount] = monitors[i].targetId;
+        g_menuMonitors[g_menuMonitorCount].targetId = monitors[i].targetId;
+        g_menuMonitors[g_menuMonitorCount].luidLow = monitors[i].luidLow;
+        g_menuMonitors[g_menuMonitorCount].luidHigh = monitors[i].luidHigh;
         g_menuMonitorCount++;
 
         AppendMenuW(hMenu, MF_STRING, menuId, label);
@@ -1564,7 +1624,9 @@ static void ShowContextMenu(void)
                           monitors[i].name,
                           hdrEnabled ? L"ON" : L"OFF");
                 UINT menuId = IDM_HDR_BASE + (UINT)g_menuHdrCount;
-                g_menuHdrIds[g_menuHdrCount] = monitors[i].targetId;
+                g_menuHdr[g_menuHdrCount].targetId = monitors[i].targetId;
+                g_menuHdr[g_menuHdrCount].luidLow = monitors[i].luidLow;
+                g_menuHdr[g_menuHdrCount].luidHigh = monitors[i].luidHigh;
                 g_menuHdrCount++;
                 AppendMenuW(hMenu, MF_STRING, menuId, label);
             } else {
@@ -1620,20 +1682,22 @@ static void ShowContextMenu(void)
  * Asks for confirmation before switching to exclusive mode.
  * Skips if the monitor is already the only active one.
  */
-static void ConfirmSwitch(UINT32 targetId)
+static void ConfirmSwitch(MonitorIdentity mon)
 {
     MonitorInfo monitors[MAX_MONITORS];
     int monCount = GetAllMonitors(monitors, MAX_MONITORS);
 
     WCHAR name[64];
-    wsprintfW(name, L"target %u", targetId);
+    wsprintfW(name, L"target %u", mon.targetId);
     BOOL alreadyActive = FALSE;
     int activeCount = 0;
 
     int i;
     for (i = 0; i < monCount; i++) {
         if (monitors[i].isActive) activeCount++;
-        if (monitors[i].targetId == targetId) {
+        if (monitors[i].targetId == mon.targetId
+            && monitors[i].luidLow == mon.luidLow
+            && monitors[i].luidHigh == mon.luidHigh) {
             lstrcpynW(name, monitors[i].name, 64);
             if (monitors[i].isActive) alreadyActive = TRUE;
         }
@@ -1651,7 +1715,7 @@ static void ConfirmSwitch(UINT32 targetId)
 
     if (MessageBoxW(NULL, msg, L"MonitorSwitcher",
                     MB_YESNO | MB_ICONWARNING) == IDYES) {
-        SetExclusiveMonitor(targetId);
+        SetExclusiveMonitor(mon);
     }
 }
 

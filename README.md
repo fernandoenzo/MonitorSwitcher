@@ -86,7 +86,7 @@ These hotkeys are essential when working with a single monitor — the tray icon
 
 MonitorSwitcher uses several Windows APIs, each for what it does best:
 
-- **`SetDisplayConfig`** — Activates and deactivates monitors (topology changes). Uses `SDC_TOPOLOGY_SUPPLIED` to restore modes from Windows' persistence database, avoiding the 60Hz fallback caused by `SDC_ALLOW_CHANGES`. When saving the original layout, stores `{targetId, sourceId}` pairs to preserve extend vs duplicate configurations and primary monitor order.
+- **`SetDisplayConfig`** — Activates and deactivates monitors (topology changes). Uses `SDC_TOPOLOGY_SUPPLIED` to restore modes from Windows' persistence database, avoiding the 60Hz fallback caused by `SDC_ALLOW_CHANGES`. When saving the original layout, stores `{targetId, sourceId, adapterLUID}` tuples to preserve extend vs duplicate configurations and primary monitor order.
 - **`ChangeDisplaySettingsExW`** — Changes resolution and refresh rate on the active monitor. Finds the exact DEVMODE from the driver's mode list and applies it directly, preserving all signal parameters.
 - **`QueryDisplayConfig`** with `QDC_ALL_PATHS` / `QDC_ONLY_ACTIVE_PATHS` — Enumerates all connected monitors and their current state.
 - **`DisplayConfigGetDeviceInfo`** — Resolves friendly monitor names (e.g. "LG ULTRAGEAR") and GDI device names.

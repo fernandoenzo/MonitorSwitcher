@@ -83,17 +83,17 @@ No automated test framework. Manual testing required:
 ## Architecture
 
 ### State Management
-- `g_originalTopology[]` — array of `{targetId, sourceId}` pairs saved once at startup (primary first), never overwritten
+- `g_originalTopology[]` — array of `TopologyEntry` structs `{targetId, sourceId, luidLow, luidHigh}` saved once at startup (primary first), never overwritten
 - `IsTopologyChanged()` — queries current active paths and compares against `g_originalTopology` to detect any topology change, regardless of origin (MonitorSwitcher, Windows Settings, etc.)
 - `g_selfChanging` — reentrancy guard suppressing WM_DISPLAYCHANGE during our own changes
-- Menu lookup tables (`g_menuMonitorIds`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdrIds`) map menu item IDs to action parameters
+- Menu lookup tables (`g_menuMonitors`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdr`) map menu item IDs to action parameters
 
 ### Menu Callback Pattern
 WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
-- `IDM_MONITOR_BASE` (1000+) — monitor targetIds
+- `IDM_MONITOR_BASE` (1000+) — monitor `MonitorIdentity` structs
 - `IDM_RES_BASE` (2000+) — resolution entries
 - `IDM_FREQ_BASE` (3000+) — frequency values
-- `IDM_HDR_BASE` (4000+) — HDR monitor targetIds
+- `IDM_HDR_BASE` (4000+) — HDR monitor `MonitorIdentity` structs
 
 ### Monitor Enumeration (Three-Phase)
 1. **Phase 1:** `QDC_ONLY_ACTIVE_PATHS` — get current GDI name, resolution, frequency for active targets
@@ -132,7 +132,6 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 
 - All code comments and documentation must be written in **English**.
 - The C code uses the Win32 Unicode API exclusively (all `W`-suffixed functions, `WCHAR` strings with `L"..."` prefix). The `-municode` compiler flag handles the `UNICODE` / `_UNICODE` defines.
-- The project is intentionally single-file (one `.c` file). Do not split it into multiple source files.
 - Comments use `/* C-style */` only (no `//`). Every function has a block comment describing its purpose and any non-obvious behavior.
 - Section headers use Unicode box-drawing characters: `/* ─── Section Name ──── */`
 - Constants: `UPPER_SNAKE_CASE` via `#define`, grouped by category with prefixes (`TIMER_`, `IDM_`, `HOTKEY_`, `MAX_`).
@@ -142,6 +141,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - K&R brace style, 4-space indentation.
 - No heap allocation — all stack locals and static globals.
 - All git commits must be **signed** (`git commit -S`).
+- Git tags must be **lightweight** (`git tag 1.6`), not annotated or signed.
 
 ## Important Technical Details
 
