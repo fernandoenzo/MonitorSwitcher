@@ -428,7 +428,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
         if (status == 1) {
             g_updateState = UPDATE_AVAILABLE;
             WCHAR msg[128];
-            wsprintfW(msg, L"Update to v%s available!", g_updateVersion);
+            wsprintfW(msg, L"Update to %s available!", g_updateVersion);
             ShowBalloon(L"MonitorSwitcher Update", msg);
         } else if (status == 0) {
             g_updateState = UPDATE_LATEST;
@@ -1758,12 +1758,12 @@ static void ShowContextMenu(void)
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
     if (g_updateState == UPDATE_AVAILABLE) {
         WCHAR msg[128];
-        wsprintfW(msg, L"\x2B50 Update to v%s available!", g_updateVersion); /* Star emoji fallback or use "Update to..." */
+        wsprintfW(msg, L"Update to %s available!", g_updateVersion);
         AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, msg);
     } else if (g_updateState == UPDATE_CHECKING) {
         AppendMenuW(hMenu, MF_STRING | MF_GRAYED | MF_DISABLED, IDM_CHECK_UPDATE, L"Checking for updates...");
     } else if (g_updateState == UPDATE_LATEST) {
-        AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, L"Check for updates (Up to date)");
+        AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, L"Check for updates (latest)");
     } else {
         AppendMenuW(hMenu, MF_STRING, IDM_CHECK_UPDATE, L"Check for updates");
     }
