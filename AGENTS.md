@@ -142,6 +142,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - No heap allocation — all stack locals and static globals.
 - All git commits must be **signed** (`git commit -S`).
 - Git tags must be **lightweight** (`git tag 1.6`), not annotated or signed.
+- When elaborating complex plans with the user, save them to a temporary text file (e.g., `plan.md`) to ensure they survive conversation compressions. These files must be deleted before making a git commit and should never be tracked in the repository.
 
 ## Important Technical Details
 
