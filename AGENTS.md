@@ -83,7 +83,7 @@ No automated test framework. Manual testing required:
 ## Architecture
 
 ### State Management
-- `g_originalTopology[]` — array of `TopologyEntry` structs `{targetId, sourceId, luidLow, luidHigh}` saved once at startup (primary first), never overwritten
+- `g_originalTopology[]` — array of `TopologyEntry` structs with `MonitorIdentity identity` and `sourceId`, saved once at startup (primary first), never overwritten
 - `IsTopologyChanged()` — queries current active paths and compares against `g_originalTopology` to detect any topology change, regardless of origin (MonitorSwitcher, Windows Settings, etc.)
 - `g_selfChanging` — reentrancy guard suppressing WM_DISPLAYCHANGE during our own changes
 - Menu lookup tables (`g_menuMonitors`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdr`) map menu item IDs to action parameters

@@ -79,33 +79,33 @@ typedef struct {
 } MonitorIdentity;
 
 /*
- * Saved topology entry for restore. Primary monitor first.
- * Includes adapter LUID for unambiguous identification.
+ * Display resolution entry for menu lookup.
  */
-typedef struct {
-    UINT32 targetId;
-    UINT32 sourceId;
-    UINT32 luidLow;
-    UINT32 luidHigh;
-} TopologyEntry;
-
-typedef struct {
-    UINT32 targetId;
-    WCHAR  name[64];
-    WCHAR  devPath[128];
-    UINT32 luidLow;
-    UINT32 luidHigh;
-    BOOL   isActive;
-    WCHAR  gdiName[CCHDEVICENAME];
-    UINT32 w;
-    UINT32 h;
-    UINT32 freq;
-} MonitorInfo;
-
 typedef struct {
     UINT32 w;
     UINT32 h;
 } ResolutionEntry;
+
+/*
+ * Monitor information: identity, display properties, and current mode.
+ */
+typedef struct {
+    MonitorIdentity identity;
+    WCHAR  name[64];
+    WCHAR  devPath[128];
+    BOOL   isActive;
+    WCHAR  gdiName[CCHDEVICENAME];
+    ResolutionEntry resolution;
+    UINT32 freq;
+} MonitorInfo;
+
+/*
+ * Saved topology entry for restore. Primary monitor first.
+ */
+typedef struct {
+    MonitorIdentity identity;
+    UINT32 sourceId;
+} TopologyEntry;
 
 /* ─── Global State ──────────────────────────────────────────────────── */
 
@@ -327,9 +327,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             int monCount = GetAllMonitors(monitors, MAX_MONITORS);
             if (index < monCount) {
                 MonitorIdentity mon;
-                mon.targetId = monitors[index].targetId;
-                mon.luidLow = monitors[index].luidLow;
-                mon.luidHigh = monitors[index].luidHigh;
+                mon.targetId = monitors[index].identity.targetId;
+                mon.luidLow = monitors[index].identity.luidLow;
+                mon.luidHigh = monitors[index].identity.luidHigh;
                 SetExclusiveMonitor(mon);
             }
             return 0;
@@ -431,14 +431,14 @@ static int CompareMonitors(const void *a, const void *b)
     const MonitorInfo *m1 = (const MonitorInfo *)a;
     const MonitorInfo *m2 = (const MonitorInfo *)b;
 
-    if (m1->luidHigh != m2->luidHigh) {
-        return (m1->luidHigh < m2->luidHigh) ? -1 : 1;
+    if (m1->identity.luidHigh != m2->identity.luidHigh) {
+        return (m1->identity.luidHigh < m2->identity.luidHigh) ? -1 : 1;
     }
-    if (m1->luidLow != m2->luidLow) {
-        return (m1->luidLow < m2->luidLow) ? -1 : 1;
+    if (m1->identity.luidLow != m2->identity.luidLow) {
+        return (m1->identity.luidLow < m2->identity.luidLow) ? -1 : 1;
     }
-    if (m1->targetId != m2->targetId) {
-        return (m1->targetId < m2->targetId) ? -1 : 1;
+    if (m1->identity.targetId != m2->identity.targetId) {
+        return (m1->identity.targetId < m2->identity.targetId) ? -1 : 1;
     }
     return 0;
 }
@@ -535,7 +535,7 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
                 BOOL seen = FALSE;
                 int j;
                 for (j = 0; j < count; j++) {
-                    if (monitors[j].targetId == tgtId) {
+                    if (monitors[j].identity.targetId == tgtId) {
                         seen = TRUE; break;
                     }
                 }
@@ -561,14 +561,14 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
 
                 MonitorInfo *mon = &monitors[count];
                 ZeroMemory(mon, sizeof(*mon));
-                mon->targetId = tgtId;
+                mon->identity.targetId = tgtId;
                 lstrcpynW(mon->name,
                           tgtName.monitorFriendlyDeviceName, 64);
                 lstrcpynW(mon->devPath,
                           tgtName.monitorDevicePath, 128);
-                mon->luidLow  =
+                mon->identity.luidLow  =
                     g_pathBuf[i].targetInfo.adapterId.LowPart;
-                mon->luidHigh =
+                mon->identity.luidHigh =
                     (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
 
                 /* Cross-reference with active info from Phase 1 */
@@ -578,8 +578,8 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
                         mon->isActive = TRUE;
                         lstrcpynW(mon->gdiName,
                                   activeGdi[j], CCHDEVICENAME);
-                        mon->w    = activeW[j];
-                        mon->h    = activeH[j];
+                        mon->resolution.w = activeW[j];
+                        mon->resolution.h = activeH[j];
                         mon->freq = activeFreq[j];
                         break;
                     }
@@ -676,13 +676,13 @@ static BOOL IsTopologyChanged(void)
         int j;
         for (j = 0; j < g_originalTopologyCount; j++) {
             if (g_pathBuf[i].targetInfo.id
-                    == g_originalTopology[j].targetId
+                    == g_originalTopology[j].identity.targetId
                 && g_pathBuf[i].sourceInfo.id
                     == g_originalTopology[j].sourceId
                 && g_pathBuf[i].targetInfo.adapterId.LowPart
-                    == g_originalTopology[j].luidLow
+                    == g_originalTopology[j].identity.luidLow
                 && (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart
-                    == g_originalTopology[j].luidHigh) {
+                    == g_originalTopology[j].identity.luidHigh) {
                 found = TRUE;
                 break;
             }
@@ -696,7 +696,7 @@ static BOOL IsTopologyChanged(void)
 
 /*
  * Snapshots the current active display topology (primary monitor first).
- * Stores {targetId, sourceId, luidLow, luidHigh} tuples for unambiguous identification.
+ * Stores {identity, sourceId} tuples for unambiguous identification.
  * Paths and modes are queried fresh on restore; only topology is saved.
  */
 static void SaveConfig(void)
@@ -718,13 +718,13 @@ static void SaveConfig(void)
 
     UINT32 i;
     for (i = 0; i < pc && g_originalTopologyCount < MAX_TOPOLOGY; i++) {
-        g_originalTopology[g_originalTopologyCount].targetId =
+        g_originalTopology[g_originalTopologyCount].identity.targetId =
             g_pathBuf[i].targetInfo.id;
         g_originalTopology[g_originalTopologyCount].sourceId =
             g_pathBuf[i].sourceInfo.id;
-        g_originalTopology[g_originalTopologyCount].luidLow =
+        g_originalTopology[g_originalTopologyCount].identity.luidLow =
             g_pathBuf[i].targetInfo.adapterId.LowPart;
-        g_originalTopology[g_originalTopologyCount].luidHigh =
+        g_originalTopology[g_originalTopologyCount].identity.luidHigh =
             (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
         g_originalTopologyCount++;
     }
@@ -936,10 +936,10 @@ static void RestoreOriginal(void)
 
         /* Check against saved topology */
         for (j = 0; j < g_originalTopologyCount; j++) {
-            if (tgtId == g_originalTopology[j].targetId
+            if (tgtId == g_originalTopology[j].identity.targetId
                 && srcId == g_originalTopology[j].sourceId
-                && luidLow == g_originalTopology[j].luidLow
-                && luidHigh == g_originalTopology[j].luidHigh) {
+                && luidLow == g_originalTopology[j].identity.luidLow
+                && luidHigh == g_originalTopology[j].identity.luidHigh) {
                 if (foundCount < MAX_TOPOLOGY) {
                     foundTgtIds[foundCount] = tgtId;
                     foundSrcIds[foundCount] = srcId;
@@ -973,10 +973,10 @@ static void RestoreOriginal(void)
     for (s = 0; s < g_originalTopologyCount; s++) {
         int k;
         for (k = 0; k < foundCount; k++) {
-            if (foundTgtIds[k] == g_originalTopology[s].targetId
+            if (foundTgtIds[k] == g_originalTopology[s].identity.targetId
                 && foundSrcIds[k] == g_originalTopology[s].sourceId
-                && foundLuidLows[k] == g_originalTopology[s].luidLow
-                && foundLuidHighs[k] == g_originalTopology[s].luidHigh) {
+                && foundLuidLows[k] == g_originalTopology[s].identity.luidLow
+                && foundLuidHighs[k] == g_originalTopology[s].identity.luidHigh) {
                 restorePaths[restoreCount] = g_pathBuf[foundIdx[k]];
                 restorePaths[restoreCount].flags =
                     DISPLAYCONFIG_PATH_ACTIVE;
@@ -1355,9 +1355,9 @@ static void ToggleHdr(MonitorIdentity mon)
     MonitorInfo *fullInfo = NULL;
     int i;
     for (i = 0; i < monCount; i++) {
-        if (monitors[i].targetId == mon.targetId
-            && monitors[i].luidLow == mon.luidLow
-            && monitors[i].luidHigh == mon.luidHigh) {
+        if (monitors[i].identity.targetId == mon.targetId
+            && monitors[i].identity.luidLow == mon.luidLow
+            && monitors[i].identity.luidHigh == mon.luidHigh) {
             fullInfo = &monitors[i];
             break;
         }
@@ -1368,7 +1368,7 @@ static void ToggleHdr(MonitorIdentity mon)
         return;
     }
 
-    if (!IsHdrSupported(fullInfo->luidLow, fullInfo->luidHigh, fullInfo->targetId)) {
+    if (!IsHdrSupported(fullInfo->identity.luidLow, fullInfo->identity.luidHigh, fullInfo->identity.targetId)) {
         WCHAR msg[128];
         wsprintfW(msg, L"%s: HDR not supported", fullInfo->name);
         ShowBalloon(L"MonitorSwitcher", msg);
@@ -1392,9 +1392,9 @@ static void ToggleHdr(MonitorIdentity mon)
     si.header.type =
         DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE;
     si.header.size = sizeof(si);
-    si.header.adapterId.LowPart  = fullInfo->luidLow;
-    si.header.adapterId.HighPart = (LONG)fullInfo->luidHigh;
-    si.header.id = fullInfo->targetId;
+    si.header.adapterId.LowPart  = fullInfo->identity.luidLow;
+    si.header.adapterId.HighPart = (LONG)fullInfo->identity.luidHigh;
+    si.header.id = fullInfo->identity.targetId;
     si.enableAdvancedColor = newState ? 1 : 0;
 
     LONG ret = DisplayConfigSetDeviceInfo(&si.header);
@@ -1433,9 +1433,9 @@ static void ToggleHdrPrimary(void)
         if (monitors[i].isActive
             && lstrcmpW(monitors[i].gdiName, gdiName) == 0) {
             MonitorIdentity mon;
-            mon.targetId = monitors[i].targetId;
-            mon.luidLow = monitors[i].luidLow;
-            mon.luidHigh = monitors[i].luidHigh;
+            mon.targetId = monitors[i].identity.targetId;
+            mon.luidLow = monitors[i].identity.luidLow;
+            mon.luidHigh = monitors[i].identity.luidHigh;
             ToggleHdr(mon);
             return;
         }
@@ -1483,7 +1483,7 @@ static void ShowContextMenu(void)
     for (i = 0; i < monCount; i++) {
         if (monitors[i].isActive) {
             activeCount++;
-            singleActiveTargetId = monitors[i].targetId;
+            singleActiveTargetId = monitors[i].identity.targetId;
         }
     }
 
@@ -1500,23 +1500,23 @@ static void ShowContextMenu(void)
         WCHAR label[256];
         int num = g_menuMonitorCount + 1;
 
-        if (monitors[i].isActive && monitors[i].w > 0) {
+        if (monitors[i].isActive && monitors[i].resolution.w > 0) {
             const WCHAR *marker;
             if (activeCount == 1
-                && monitors[i].targetId == singleActiveTargetId)
+                && monitors[i].identity.targetId == singleActiveTargetId)
                 marker = L"★";
             else
                 marker = L"☆";
-            wsprintfW(label, L"%s  %d. %s  |  %ux%u @ %uHz",
+            wsprintfW(label, L"%s  %d. %s  |  %lux%u @ %uHz",
                       marker, num, monitors[i].name,
-                      monitors[i].w, monitors[i].h, monitors[i].freq);
+                      monitors[i].resolution.w, monitors[i].resolution.h, monitors[i].freq);
         } else if (!monitors[i].isActive) {
             wsprintfW(label, L"     %d. %s  (off)",
                       num, monitors[i].name);
         } else {
             const WCHAR *marker;
             if (activeCount == 1
-                && monitors[i].targetId == singleActiveTargetId)
+                && monitors[i].identity.targetId == singleActiveTargetId)
                 marker = L"★";
             else
                 marker = L"☆";
@@ -1525,9 +1525,9 @@ static void ShowContextMenu(void)
         }
 
         UINT menuId = IDM_MONITOR_BASE + (UINT)g_menuMonitorCount;
-        g_menuMonitors[g_menuMonitorCount].targetId = monitors[i].targetId;
-        g_menuMonitors[g_menuMonitorCount].luidLow = monitors[i].luidLow;
-        g_menuMonitors[g_menuMonitorCount].luidHigh = monitors[i].luidHigh;
+        g_menuMonitors[g_menuMonitorCount].targetId = monitors[i].identity.targetId;
+        g_menuMonitors[g_menuMonitorCount].luidLow = monitors[i].identity.luidLow;
+        g_menuMonitors[g_menuMonitorCount].luidHigh = monitors[i].identity.luidHigh;
         g_menuMonitorCount++;
 
         AppendMenuW(hMenu, MF_STRING, menuId, label);
@@ -1607,9 +1607,9 @@ static void ShowContextMenu(void)
         for (i = 0; i < monCount; i++) {
             if (!monitors[i].isActive)
                 continue;
-            if (!IsHdrSupported(monitors[i].luidLow,
-                                monitors[i].luidHigh,
-                                monitors[i].targetId))
+            if (!IsHdrSupported(monitors[i].identity.luidLow,
+                                monitors[i].identity.luidHigh,
+                                monitors[i].identity.targetId))
                 continue;
 
             anyHdrShown = TRUE;
@@ -1624,9 +1624,9 @@ static void ShowContextMenu(void)
                           monitors[i].name,
                           hdrEnabled ? L"ON" : L"OFF");
                 UINT menuId = IDM_HDR_BASE + (UINT)g_menuHdrCount;
-                g_menuHdr[g_menuHdrCount].targetId = monitors[i].targetId;
-                g_menuHdr[g_menuHdrCount].luidLow = monitors[i].luidLow;
-                g_menuHdr[g_menuHdrCount].luidHigh = monitors[i].luidHigh;
+                g_menuHdr[g_menuHdrCount].targetId = monitors[i].identity.targetId;
+                g_menuHdr[g_menuHdrCount].luidLow = monitors[i].identity.luidLow;
+                g_menuHdr[g_menuHdrCount].luidHigh = monitors[i].identity.luidHigh;
                 g_menuHdrCount++;
                 AppendMenuW(hMenu, MF_STRING, menuId, label);
             } else {
@@ -1695,9 +1695,9 @@ static void ConfirmSwitch(MonitorIdentity mon)
     int i;
     for (i = 0; i < monCount; i++) {
         if (monitors[i].isActive) activeCount++;
-        if (monitors[i].targetId == mon.targetId
-            && monitors[i].luidLow == mon.luidLow
-            && monitors[i].luidHigh == mon.luidHigh) {
+        if (monitors[i].identity.targetId == mon.targetId
+            && monitors[i].identity.luidLow == mon.luidLow
+            && monitors[i].identity.luidHigh == mon.luidHigh) {
             lstrcpynW(name, monitors[i].name, 64);
             if (monitors[i].isActive) alreadyActive = TRUE;
         }
