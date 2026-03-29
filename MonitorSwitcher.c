@@ -311,8 +311,9 @@ static DWORD WINAPI CheckUpdateThread(LPVOID lpParam)
             HINTERNET hReq = HttpOpenRequestW(hConnect, L"HEAD",
                                               L"/fernandoenzo/MonitorSwitcher/releases/latest",
                                               NULL, NULL, NULL,
-                                              INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+                                              INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE, 0);
             if (hReq) {
+                HttpAddRequestHeadersW(hReq, L"Cache-Control: no-cache\r\n", -1, HTTP_ADDREQ_FLAG_ADD);
                 if (HttpSendRequestW(hReq, NULL, 0, NULL, 0)) {
                     WCHAR szUrl[512] = {0};
                     DWORD dwSize = sizeof(szUrl);
