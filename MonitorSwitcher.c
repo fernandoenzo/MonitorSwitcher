@@ -43,6 +43,7 @@
 #define IDM_EXIT           5002
 #define IDM_TOGGLE_HOTKEYS 5003
 #define IDM_CHECK_UPDATE   5004
+#define IDM_CUSTOMIZE_HOTKEYS 5005
 
 typedef enum {
     UPDATE_UNKNOWN,
@@ -245,6 +246,11 @@ static void UnregisterHotkeys(void);
 /* Hotkey configuration persistence */
 static BOOL LoadHotkeyConfig(void);
 static void SaveHotkeyConfig(void);
+
+/* Hotkey customization dialog */
+static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static void ShowHotkeyDialog(void);
+static void HotkeyToString(UINT modifiers, UINT vk, WCHAR *buf, int bufLen);
 
 /* Auto-start */
 static BOOL IsAutoStartEnabled(void);
@@ -520,6 +526,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
                 ShowBalloon(L"Hotkeys disabled",
                             L"All hotkeys have been unregistered");
             }
+        } else if (id == IDM_CUSTOMIZE_HOTKEYS) {
+            ShowHotkeyDialog();
         } else if (id == IDM_CHECK_UPDATE) {
             if (g_updateState == UPDATE_AVAILABLE) {
                 ShellExecuteW(NULL, L"open", L"https://github.com/fernandoenzo/MonitorSwitcher/releases/latest", NULL, NULL, SW_SHOWNORMAL);
@@ -1798,6 +1806,7 @@ static void ShowContextMenu(void)
     } else {
         AppendMenuW(hMenu, MF_STRING | MF_UNCHECKED, IDM_TOGGLE_HOTKEYS, L"Hotkeys disabled");
     }
+    AppendMenuW(hMenu, MF_STRING, IDM_CUSTOMIZE_HOTKEYS, L"    Customize...");
     AppendMenuW(hMenu, MF_STRING | (IsAutoStartEnabled() ? MF_CHECKED : MF_UNCHECKED),
                 IDM_AUTOSTART, L"Start with Windows");
 
@@ -2113,6 +2122,277 @@ static void SaveHotkeyConfig(void)
                    (const BYTE *)&g_hotkeyMonitorPrefix, sizeof(DWORD));
 
     RegCloseKey(hKey);
+}
+
+/* ─── Hotkey String Conversion ─────────────────────────────────────────── */
+
+/*
+ * Converts hotkey modifiers and virtual key code to a human-readable string.
+ * Format: "Ctrl+Alt+M" or "Ctrl+Shift+1" etc.
+ */
+static void HotkeyToString(UINT modifiers, UINT vk, WCHAR *buf, int bufLen)
+{
+    (void)bufLen;  /* unused */
+    buf[0] = L'\0';
+    int pos = 0;
+
+    if (modifiers & MOD_CONTROL) {
+        if (pos > 0) buf[pos++] = L'+';
+        wcscat(buf, L"Ctrl");
+        pos += 4;}
+    if (modifiers & MOD_ALT) {
+        if (pos > 0) buf[pos++] = L'+';
+        wcscat(buf, L"Alt");
+        pos += 3;
+    }
+    if (modifiers & MOD_SHIFT) {
+        if (pos > 0) buf[pos++] = L'+';
+        wcscat(buf, L"Shift");
+        pos += 5;
+    }
+    if (modifiers & MOD_WIN) {
+        if (pos > 0) buf[pos++] = L'+';
+        wcscat(buf, L"Win");
+        pos += 3;
+    }
+
+    if (pos > 0) buf[pos++] = L'+';
+
+    /* Convert virtual key code to key name */
+    if (vk >= 'A' && vk <= 'Z') {
+        buf[pos++] = (WCHAR)vk;
+        buf[pos] = L'\0';
+    } else if (vk >= '0' && vk <= '9') {
+        buf[pos++] = (WCHAR)vk;
+        buf[pos] = L'\0';
+    } else {
+        /* Use GetKeyNameText for special keys */
+        WCHAR keyName[64];
+        UINT scanCode = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+        if (scanCode && GetKeyNameTextW(scanCode << 16, keyName, 64) > 0) {
+            wcscat(buf, keyName);
+        } else {
+            /* Fallback: just show the hex code */
+            WCHAR hex[16];
+            wsprintfW(hex, L"0x%02X", vk);
+            wcscat(buf, hex);
+        }
+    }
+}
+
+/* ─── Hotkey Customization Dialog ─────────────────────────────────────── */
+
+/* Dialog state */
+static int g_captureTarget = 0;  /* 0=none, 1=menu, 2=restore, 3=hdr */
+static HotkeyConfig g_dialogHotkeyMenu;
+static HotkeyConfig g_dialogHotkeyRestore;
+static HotkeyConfig g_dialogHotkeyHdr;
+static UINT g_dialogMonitorPrefix;
+
+/*
+ * Updates the edit control with the current hotkey string.
+ */
+static void UpdateHotkeyEdit(HWND hwnd, int editId, UINT modifiers, UINT vk)
+{
+    WCHAR buf[64];
+    HotkeyToString(modifiers, vk, buf, 64);
+    SetDlgItemTextW(hwnd, editId, buf);
+}
+
+/*
+ * Updates the checkbox states from the prefix bitmask.
+ */
+static void UpdatePrefixCheckboxes(HWND hwnd)
+{
+    CheckDlgButton(hwnd, IDC_CHK_CTRL, (g_dialogMonitorPrefix & MOD_CONTROL) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHK_ALT, (g_dialogMonitorPrefix & MOD_ALT) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHK_SHIFT, (g_dialogMonitorPrefix & MOD_SHIFT) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CHK_WIN, (g_dialogMonitorPrefix & MOD_WIN) ? BST_CHECKED : BST_UNCHECKED);
+}
+
+/*
+ * Reads the checkbox states and updates the prefix bitmask.
+ */
+static void ReadPrefixCheckboxes(HWND hwnd)
+{
+    g_dialogMonitorPrefix = 0;
+    if (IsDlgButtonChecked(hwnd, IDC_CHK_CTRL) == BST_CHECKED)
+        g_dialogMonitorPrefix |= MOD_CONTROL;
+    if (IsDlgButtonChecked(hwnd, IDC_CHK_ALT) == BST_CHECKED)
+        g_dialogMonitorPrefix |= MOD_ALT;
+    if (IsDlgButtonChecked(hwnd, IDC_CHK_SHIFT) == BST_CHECKED)
+        g_dialogMonitorPrefix |= MOD_SHIFT;
+    if (IsDlgButtonChecked(hwnd, IDC_CHK_WIN) == BST_CHECKED)
+        g_dialogMonitorPrefix |= MOD_WIN;
+}
+
+/*
+ * Dialog procedure for hotkey customization.
+ */
+static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    (void)lParam;switch (msg) {
+    case WM_INITDIALOG:
+        /* Copy current config to dialog state */
+        g_dialogHotkeyMenu = g_hotkeyMenu;
+        g_dialogHotkeyRestore = g_hotkeyRestore;
+        g_dialogHotkeyHdr = g_hotkeyHdr;
+        g_dialogMonitorPrefix = g_hotkeyMonitorPrefix;g_captureTarget = 0;
+
+        /* Update edit controls */
+        UpdateHotkeyEdit(hwnd, IDC_HOTKEY_MENU, g_dialogHotkeyMenu.modifiers, g_dialogHotkeyMenu.vk);
+        UpdateHotkeyEdit(hwnd, IDC_HOTKEY_RESTORE, g_dialogHotkeyRestore.modifiers, g_dialogHotkeyRestore.vk);
+        UpdateHotkeyEdit(hwnd, IDC_HOTKEY_HDR, g_dialogHotkeyHdr.modifiers, g_dialogHotkeyHdr.vk);
+
+        /* Update prefix checkboxes */
+        UpdatePrefixCheckboxes(hwnd);
+
+        /* Disable hotkeys while dialog is open */
+        UnregisterHotkeys();
+
+        return TRUE;
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (g_captureTarget == 0)
+            break;
+
+        {
+            UINT vk = (UINT)wParam;
+            
+            /* Esc cancels capture mode */
+            if (vk == VK_ESCAPE) {
+                g_captureTarget = 0;
+                /* Restore previous value */
+                switch (g_captureTarget) {
+                case 1:
+                    UpdateHotkeyEdit(hwnd, IDC_HOTKEY_MENU, g_dialogHotkeyMenu.modifiers, g_dialogHotkeyMenu.vk);
+                    break;
+                case 2:
+                    UpdateHotkeyEdit(hwnd, IDC_HOTKEY_RESTORE, g_dialogHotkeyRestore.modifiers, g_dialogHotkeyRestore.vk);
+                    break;
+                case 3:
+                    UpdateHotkeyEdit(hwnd, IDC_HOTKEY_HDR, g_dialogHotkeyHdr.modifiers, g_dialogHotkeyHdr.vk);
+                    break;
+                }
+                return TRUE;
+            }
+
+            /* Ignore modifier-only presses */
+            if (vk == VK_CONTROL || vk == VK_MENU || vk == VK_SHIFT || vk == VK_LWIN || vk == VK_RWIN)
+                break;
+
+            /* Get current modifier state */
+            UINT modifiers = 0;
+            if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= MOD_CONTROL;
+            if (GetKeyState(VK_MENU) & 0x8000) modifiers |= MOD_ALT;
+            if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= MOD_SHIFT;
+            if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000)) modifiers |= MOD_WIN;
+
+            /* Store captured hotkey */
+            switch (g_captureTarget) {
+            case 1:
+                g_dialogHotkeyMenu.modifiers = modifiers;
+                g_dialogHotkeyMenu.vk = vk;
+                UpdateHotkeyEdit(hwnd, IDC_HOTKEY_MENU, modifiers, vk);
+                break;
+            case 2:
+                g_dialogHotkeyRestore.modifiers = modifiers;
+                g_dialogHotkeyRestore.vk = vk;
+                UpdateHotkeyEdit(hwnd, IDC_HOTKEY_RESTORE, modifiers, vk);
+                break;
+            case 3:
+                g_dialogHotkeyHdr.modifiers = modifiers;
+                g_dialogHotkeyHdr.vk = vk;
+                UpdateHotkeyEdit(hwnd, IDC_HOTKEY_HDR, modifiers, vk);
+                break;
+            }
+
+            g_captureTarget = 0;
+        }
+        return TRUE;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_CAPTURE_MENU:
+            g_captureTarget = 1;
+            SetDlgItemTextW(hwnd, IDC_HOTKEY_MENU, L"Press key combination...");
+            SetFocus(hwnd);
+            return TRUE;
+
+        case IDC_CAPTURE_RESTORE:
+            g_captureTarget = 2;
+            SetDlgItemTextW(hwnd, IDC_HOTKEY_RESTORE, L"Press key combination...");
+            SetFocus(hwnd);
+            return TRUE;
+
+        case IDC_CAPTURE_HDR:
+            g_captureTarget = 3;
+            SetDlgItemTextW(hwnd, IDC_HOTKEY_HDR, L"Press key combination...");
+            SetFocus(hwnd);
+            return TRUE;
+
+        case IDC_CHK_CTRL:
+        case IDC_CHK_ALT:
+        case IDC_CHK_SHIFT:
+        case IDC_CHK_WIN:
+            ReadPrefixCheckboxes(hwnd);
+            return TRUE;
+
+        case IDC_RESET:
+            /* Reset to defaults */
+            g_dialogHotkeyMenu = DEFAULT_HOTKEY_MENU;
+            g_dialogHotkeyRestore = DEFAULT_HOTKEY_RESTORE;
+            g_dialogHotkeyHdr = DEFAULT_HOTKEY_HDR;
+            g_dialogMonitorPrefix = DEFAULT_HOTKEY_MONITOR_PREFIX;
+            UpdateHotkeyEdit(hwnd, IDC_HOTKEY_MENU, g_dialogHotkeyMenu.modifiers, g_dialogHotkeyMenu.vk);
+            UpdateHotkeyEdit(hwnd, IDC_HOTKEY_RESTORE, g_dialogHotkeyRestore.modifiers, g_dialogHotkeyRestore.vk);
+            UpdateHotkeyEdit(hwnd, IDC_HOTKEY_HDR, g_dialogHotkeyHdr.modifiers, g_dialogHotkeyHdr.vk);
+            UpdatePrefixCheckboxes(hwnd);
+            return TRUE;
+
+        case IDOK:
+            /* Save */
+            g_hotkeyMenu = g_dialogHotkeyMenu;
+            g_hotkeyRestore = g_dialogHotkeyRestore;
+            g_hotkeyHdr = g_dialogHotkeyHdr;
+            g_hotkeyMonitorPrefix = g_dialogMonitorPrefix;
+            SaveHotkeyConfig();
+
+            /* Re-register hotkeys */
+            if (g_hotkeysEnabled) {
+                RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, g_hotkeyRestore.modifiers, g_hotkeyRestore.vk);
+                RegisterHotKey(g_hwndMain, HOTKEY_MENU, g_hotkeyMenu.modifiers, g_hotkeyMenu.vk);
+                RegisterHotKey(g_hwndMain, HOTKEY_HDR, g_hotkeyHdr.modifiers, g_hotkeyHdr.vk);
+                UpdateMonitorHotkeys();
+            }
+
+            EndDialog(hwnd, IDOK);
+            return TRUE;
+
+        case IDCANCEL:
+            /* Cancel - restore original hotkeys */
+            if (g_hotkeysEnabled) {
+                RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, g_hotkeyRestore.modifiers, g_hotkeyRestore.vk);
+                RegisterHotKey(g_hwndMain, HOTKEY_MENU, g_hotkeyMenu.modifiers, g_hotkeyMenu.vk);
+                RegisterHotKey(g_hwndMain, HOTKEY_HDR, g_hotkeyHdr.modifiers, g_hotkeyHdr.vk);
+                UpdateMonitorHotkeys();
+            }
+            EndDialog(hwnd, IDCANCEL);
+            return TRUE;
+        }
+        break;
+    }
+
+    return FALSE;
+}
+
+/*
+ * Shows the hotkey customization dialog.
+ */
+static void ShowHotkeyDialog(void)
+{
+    DialogBoxW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDD_HOTKEY_DIALOG), NULL, HotkeyDialogProc);
 }
 
 /* ─── Auto-Start ────────────────────────────────────────────────────── */
