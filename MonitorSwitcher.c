@@ -58,11 +58,38 @@ static WCHAR g_updateVersion[32] = {0};
 #define AUTOSTART_KEY      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define AUTOSTART_VALUE    L"MonitorSwitcher"
 
+/* Registry key for hotkey configuration */
+#define HOTKEY_CONFIG_KEY  L"Software\\MonitorSwitcher"
+
+/*
+
+* Hotkey configuration structure.
+* Stores modifier bitmask and virtual key code.
+*/
+typedef struct {
+    UINT modifiers;  /* MOD_CONTROL, MOD_ALT, MOD_SHIFT, MOD_WIN */
+    UINT vk;         /* Virtual key code: 'M', 'R', 'H', etc. */
+} HotkeyConfig;
+
 /* Hotkey IDs for RegisterHotKey / WM_HOTKEY */
 #define HOTKEY_RESTORE     1     /* Ctrl+Alt+R */
 #define HOTKEY_MENU        2     /* Ctrl+Alt+M */
 #define HOTKEY_HDR         3     /* Ctrl+Alt+H */
 #define HOTKEY_MONITOR_BASE 100  /* 100 .. 108 = Ctrl+Alt+1..9 */
+
+/* Dialog IDs for hotkey customization */
+#define IDD_HOTKEY_DIALOG  101
+#define IDC_HOTKEY_MENU    1001
+#define IDC_HOTKEY_RESTORE 1002
+#define IDC_HOTKEY_HDR     1003
+#define IDC_CAPTURE_MENU   1011
+#define IDC_CAPTURE_RESTORE 1012
+#define IDC_CAPTURE_HDR    1013
+#define IDC_CHK_CTRL       1021
+#define IDC_CHK_ALT        1022
+#define IDC_CHK_SHIFT      1023
+#define IDC_CHK_WIN        1024
+#define IDC_RESET          1030
 
 /* Single-instance mutex name */
 #define MUTEX_NAME         L"MonitorSwitcher_SingleInstance"
@@ -137,6 +164,18 @@ static BOOL             g_selfChanging         = FALSE;
 static BOOL             g_hotkeysEnabled      = TRUE;
 static int              g_hotkeyMonitorCount   = 0;
 
+/* Customizable hotkey configuration */
+static HotkeyConfig g_hotkeyMenu    = { MOD_CONTROL | MOD_ALT, 'M' };
+static HotkeyConfig g_hotkeyRestore = { MOD_CONTROL | MOD_ALT, 'R' };
+static HotkeyConfig g_hotkeyHdr     = { MOD_CONTROL | MOD_ALT, 'H' };
+static UINT g_hotkeyMonitorPrefix    = MOD_CONTROL | MOD_ALT;  /* Prefix for 1-9 */
+
+/* Default values (for reset) */
+static const HotkeyConfig DEFAULT_HOTKEY_MENU    = { MOD_CONTROL | MOD_ALT, 'M' };
+static const HotkeyConfig DEFAULT_HOTKEY_RESTORE = { MOD_CONTROL | MOD_ALT, 'R' };
+static const HotkeyConfig DEFAULT_HOTKEY_HDR     = { MOD_CONTROL | MOD_ALT, 'H' };
+static const UINT DEFAULT_HOTKEY_MONITOR_PREFIX  = MOD_CONTROL | MOD_ALT;
+
 /* Menu callback lookup tables — filled by ShowContextMenu, read by WM_COMMAND */
 static MonitorIdentity  g_menuMonitors[MAX_MONITORS];
 static int              g_menuMonitorCount     = 0;
@@ -203,6 +242,10 @@ static void ShowBalloon(const WCHAR *title, const WCHAR *text);
 static void UpdateMonitorHotkeys(void);
 static void UnregisterHotkeys(void);
 
+/* Hotkey configuration persistence */
+static BOOL LoadHotkeyConfig(void);
+static void SaveHotkeyConfig(void);
+
 /* Auto-start */
 static BOOL IsAutoStartEnabled(void);
 static void SetAutoStart(BOOL enable);
@@ -255,19 +298,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     SetupTrayIcon();
 
+    /* Load hotkey configuration from registry (uses defaults if not found) */
+    LoadHotkeyConfig();
+
     /* Automatically check for updates silently at startup */
     CreateThread(NULL, 0, CheckUpdateThread, (LPVOID)FALSE, 0, NULL);
 
     /* Snapshot the current topology so we can restore it later */
     SaveConfig();
 
-    /* Register global hotkeys: Ctrl+Alt+R, Ctrl+Alt+M, Ctrl+Alt+H */
+    /* Register global hotkeys using loaded or default configuration */
     if (g_hotkeysEnabled) {
-        RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_ALT, 'R');
-        RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_ALT, 'M');
-        RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_ALT, 'H');
+        RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, g_hotkeyRestore.modifiers, g_hotkeyRestore.vk);
+        RegisterHotKey(g_hwndMain, HOTKEY_MENU,    g_hotkeyMenu.modifiers,    g_hotkeyMenu.vk);
+        RegisterHotKey(g_hwndMain, HOTKEY_HDR,     g_hotkeyHdr.modifiers,     g_hotkeyHdr.vk);
 
-        /* Register dynamic monitor hotkeys (Ctrl+Alt+1..9) */
+        /* Register dynamic monitor hotkeys */
         UpdateMonitorHotkeys();
     }
 
@@ -464,12 +510,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
             g_hotkeysEnabled = !g_hotkeysEnabled;
             UnregisterHotkeys();
             if (g_hotkeysEnabled) {
-                RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, MOD_CONTROL | MOD_ALT, 'R');
-                RegisterHotKey(g_hwndMain, HOTKEY_MENU,    MOD_CONTROL | MOD_ALT, 'M');
-                RegisterHotKey(g_hwndMain, HOTKEY_HDR,     MOD_CONTROL | MOD_ALT, 'H');
+                RegisterHotKey(g_hwndMain, HOTKEY_RESTORE, g_hotkeyRestore.modifiers, g_hotkeyRestore.vk);
+                RegisterHotKey(g_hwndMain, HOTKEY_MENU,    g_hotkeyMenu.modifiers,    g_hotkeyMenu.vk);
+                RegisterHotKey(g_hwndMain, HOTKEY_HDR,     g_hotkeyHdr.modifiers,     g_hotkeyHdr.vk);
                 UpdateMonitorHotkeys();
                 ShowBalloon(L"Hotkeys enabled",
-                            L"Ctrl+Alt+M/R/H and monitor hotkeys are now active");
+                            L"Hotkeys are now active");
             } else {
                 ShowBalloon(L"Hotkeys disabled",
                             L"All hotkeys have been unregistered");
@@ -1959,7 +2005,7 @@ static void UpdateMonitorHotkeys(void)
         int toRegister = (monCount > 9) ? 9 : monCount;
         for (i = 0; i < toRegister; i++) {
             RegisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i,
-                           MOD_CONTROL | MOD_ALT, '1' + i);
+                           g_hotkeyMonitorPrefix, '1' + i);
         }
 
         g_hotkeyMonitorCount = toRegister;
@@ -1981,6 +2027,92 @@ static void UnregisterHotkeys(void)
         UnregisterHotKey(g_hwndMain, HOTKEY_MONITOR_BASE + i);
     }
     g_hotkeyMonitorCount = 0;
+}
+
+/* ─── Hotkey Configuration Persistence ───────────────────────────────── */
+
+/*
+ * Loads hotkey configuration from registry.
+ * Returns TRUE if all values were read successfully, FALSE otherwise.
+ * On failure, defaults are used (already set in global initializers).
+ */
+static BOOL LoadHotkeyConfig(void)
+{
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, HOTKEY_CONFIG_KEY,
+                      0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return FALSE;
+
+    DWORD type, size;
+    DWORD value;
+
+    /* Load Menu hotkey */
+    size = sizeof(DWORD);
+    if (RegQueryValueExW(hKey, L"Hotkey_Menu", NULL, &type, (LPBYTE)&value, &size) == ERROR_SUCCESS
+        && type == REG_DWORD) {
+        g_hotkeyMenu.modifiers = HIWORD(value);
+        g_hotkeyMenu.vk = LOBYTE(value);
+    }
+
+    /* Load Restore hotkey */
+    size = sizeof(DWORD);
+    if (RegQueryValueExW(hKey, L"Hotkey_Restore", NULL, &type, (LPBYTE)&value, &size) == ERROR_SUCCESS
+        && type == REG_DWORD) {
+        g_hotkeyRestore.modifiers = HIWORD(value);
+        g_hotkeyRestore.vk = LOBYTE(value);
+    }
+
+    /* Load HDR hotkey */
+    size = sizeof(DWORD);
+    if (RegQueryValueExW(hKey, L"Hotkey_Hdr", NULL, &type, (LPBYTE)&value, &size) == ERROR_SUCCESS
+        && type == REG_DWORD) {
+        g_hotkeyHdr.modifiers = HIWORD(value);
+        g_hotkeyHdr.vk = LOBYTE(value);
+    }
+
+    /* Load Monitor prefix */
+    size = sizeof(DWORD);
+    if (RegQueryValueExW(hKey, L"Hotkey_Prefix", NULL, &type, (LPBYTE)&value, &size) == ERROR_SUCCESS
+        && type == REG_DWORD) {
+        g_hotkeyMonitorPrefix = value;
+    }
+
+    RegCloseKey(hKey);
+    return TRUE;
+}
+
+/*
+ * Saves hotkey configuration to registry.
+ * Creates the key if it doesn't exist.
+ */
+static void SaveHotkeyConfig(void)
+{
+    HKEY hKey;
+    DWORD disp;
+
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, HOTKEY_CONFIG_KEY,
+                         0, NULL, 0, KEY_WRITE, NULL, &hKey, &disp) != ERROR_SUCCESS)
+        return;
+
+    DWORD value;
+
+    /* Save Menu hotkey */
+    value = MAKELONG(0, MAKEWORD(g_hotkeyMenu.vk, LOBYTE(g_hotkeyMenu.modifiers)));
+    RegSetValueExW(hKey, L"Hotkey_Menu", 0, REG_DWORD, (const BYTE *)&value, sizeof(DWORD));
+
+    /* Save Restore hotkey */
+    value = MAKELONG(0, MAKEWORD(g_hotkeyRestore.vk, LOBYTE(g_hotkeyRestore.modifiers)));
+    RegSetValueExW(hKey, L"Hotkey_Restore", 0, REG_DWORD, (const BYTE *)&value, sizeof(DWORD));
+
+    /* Save HDR hotkey */
+    value = MAKELONG(0, MAKEWORD(g_hotkeyHdr.vk, LOBYTE(g_hotkeyHdr.modifiers)));
+    RegSetValueExW(hKey, L"Hotkey_Hdr", 0, REG_DWORD, (const BYTE *)&value, sizeof(DWORD));
+
+    /* Save Monitor prefix */
+    RegSetValueExW(hKey, L"Hotkey_Prefix", 0, REG_DWORD,
+                   (const BYTE *)&g_hotkeyMonitorPrefix, sizeof(DWORD));
+
+    RegCloseKey(hKey);
 }
 
 /* ─── Auto-Start ────────────────────────────────────────────────────── */
