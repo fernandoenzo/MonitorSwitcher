@@ -42,7 +42,7 @@ BEGIN
     AUTOCHECKBOX    "Shift", 1023, 124, 84, 40, 10
     AUTOCHECKBOX    "Win", 1024, 174, 84, 40, 10
     
-    LTEXT           "Note: If a key combination doesn't appear when pressed, it may be in use by another app.", -1, 14, 115, 230, 20
+    LTEXT           "Note: Some keys (Tab, Enter) cannot be captured. If a combination doesn't appear, it may be reserved by the system or another app.", -1, 14, 115, 230, 26
     
     PUSHBUTTON      "Reset to Defaults", 1040, 14, 150, 80, 14
     DEFPUSHBUTTON   "Save", 1, 130, 150, 50, 14
