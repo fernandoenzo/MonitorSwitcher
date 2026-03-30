@@ -12,35 +12,39 @@
  *   IDC_HOTKEY_MENU = 1001, IDC_HOTKEY_RESTORE = 1002, IDC_HOTKEY_HDR = 1003
  *   IDC_CAPTURE_MENU = 1011, IDC_CAPTURE_RESTORE = 1012, IDC_CAPTURE_HDR = 1013
  *   IDC_CHK_CTRL = 1021, IDC_CHK_ALT = 1022, IDC_CHK_SHIFT = 1023, IDC_CHK_WIN = 1024
- *   IDC_RESET = 1030
+ *   IDC_CLEAR_MENU = 1031, IDC_CLEAR_RESTORE = 1032, IDC_CLEAR_HDR = 1033
+ *   IDC_RESET = 1040
  */
 
-101 DIALOGEX 0, 0, 230, 180
+101 DIALOGEX 0, 0, 260, 180
 STYLE 0x80C80000
 CAPTION "Customize Hotkeys"
 FONT 9, "Segoe UI"
 BEGIN
     LTEXT           "Menu hotkey:", -1, 14, 14, 60, 8
     EDITTEXT        1001, 80, 12, 80, 14, 0x0800
-    PUSHBUTTON      "Capture", 1011, 166, 12, 50, 14
+    PUSHBUTTON      "Capture", 1011, 166, 12, 40, 14
+    PUSHBUTTON      "Clear", 1031, 210, 12, 36, 14
     
     LTEXT           "Restore hotkey:", -1, 14, 32, 60, 8
     EDITTEXT        1002, 80, 30, 80, 14, 0x0800
-    PUSHBUTTON      "Capture", 1012, 166, 30, 50, 14
+    PUSHBUTTON      "Capture", 1012, 166, 30, 40, 14
+    PUSHBUTTON      "Clear", 1032, 210, 30, 36, 14
     
     LTEXT           "HDR toggle:", -1, 14, 50, 60, 8
     EDITTEXT        1003, 80, 48, 80, 14, 0x0800
-    PUSHBUTTON      "Capture", 1013, 166, 48, 50, 14
+    PUSHBUTTON      "Capture", 1013, 166, 48, 40, 14
+    PUSHBUTTON      "Clear", 1033, 210, 48, 36, 14
     
-    GROUPBOX        "Monitor hotkeys (1-9) prefix", -1, 14, 70, 202, 35
+    GROUPBOX        "Monitor hotkeys (1-9) prefix", -1, 14, 70, 232, 35
     AUTOCHECKBOX    "Ctrl", 1021, 24, 84, 40, 10
     AUTOCHECKBOX    "Alt", 1022, 74, 84, 40, 10
     AUTOCHECKBOX    "Shift", 1023, 124, 84, 40, 10
     AUTOCHECKBOX    "Win", 1024, 174, 84, 40, 10
     
-    LTEXT           "Note: If a key combination doesn't appear when pressed, it may be in use by another app.", -1, 14, 115, 200, 20
+    LTEXT           "Note: If a key combination doesn't appear when pressed, it may be in use by another app.", -1, 14, 115, 230, 20
     
-    PUSHBUTTON      "Reset to Defaults", 1030, 14, 150, 80, 14
-    DEFPUSHBUTTON   "Save", 1, 110, 150, 50, 14
-    PUSHBUTTON      "Cancel", 2, 166, 150, 50, 14
+    PUSHBUTTON      "Reset to Defaults", 1040, 14, 150, 80, 14
+    DEFPUSHBUTTON   "Save", 1, 130, 150, 50, 14
+    PUSHBUTTON      "Cancel", 2, 186, 150, 50, 14
 END
