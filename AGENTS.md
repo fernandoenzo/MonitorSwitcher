@@ -41,6 +41,8 @@ This produces `MonitorSwitcher.exe`, a standalone Windows executable with the ic
 
 The Makefile defines `VERSION` using `git describe --tags --dirty` with fallback to `dev` for builds outside a git repository. The version is passed to the compiler via `-DVERSION_STRING`.
 
+The build is **fully reproducible** and deterministic. The `Makefile` automatically sets and exports `SOURCE_DATE_EPOCH` to the timestamp of the latest git commit. Modern GNU Binutils (`ld` and `windres`) natively respect this variable, ensuring that multiple compilations of the exact same commit produce a binary with an identical PE hash (instead of embedding the current build time).
+
 ## Testing
 
 No automated test framework. Manual testing required:
@@ -158,7 +160,7 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - No heap allocation — all stack locals and static globals.
 - All git commits must be **signed** (`git commit -S`).
 - Git tags must be **lightweight** (`git tag 1.6`), not annotated or signed.
-- When elaborating plans with the user, ALWAYS save them to a temporary text file (e.g., `plan.md`) in the project root directory to ensure they survive conversation compressions. Iterate on this file throughout the conversation as the plan evolves. The AI agent has full permission to create, modify, and delete this file even in plan-only mode — this is the only exception to the read-only constraint. This file should never be tracked in the repository. After executing the plan, ALWAYS ask the user for permission to delete the file.
+- When elaborating plans with the user, ALWAYS save them to a temporary text file (e.g., `.opencode/plans/plan.md`) to ensure they survive conversation compressions. Iterate on this file throughout the conversation as the plan evolves. The AI agent has full permission to create, modify, and delete this file even in plan-only mode — this is the only exception to the read-only constraint. This file should never be tracked in the repository. After executing the plan, ALWAYS ask the user for permission to delete the file.
 
 ## Important Technical Details
 
