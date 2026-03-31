@@ -2434,6 +2434,14 @@ static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 
         return TRUE;
 
+    case WM_SETFOCUS:
+        /* Prevent DefDlgProc from redirecting focus to a child control
+         * while in capture mode. The dialog needs keyboard focus to
+         * receive WM_KEYDOWN for hotkey capture. */
+        if (g_captureTarget != 0)
+            return TRUE;
+        break;
+
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
         if (g_captureTarget == 0)
