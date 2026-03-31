@@ -1,8 +1,14 @@
-# MonitorSwitcher
+<p align="center">
+  <img src="MonitorSwitcher.svg" alt="MonitorSwitcher" width="128">
+</p>
+<h1 align="center">MonitorSwitcher</h1>
 
-![C/Win32](https://img.shields.io/badge/C-Win32-blue)
-![Windows 11](https://img.shields.io/badge/Windows-11-blue)
-![License: GPLv3+](https://img.shields.io/badge/License-GPLv3+-red)
+<p align="center">
+  <img src="https://img.shields.io/badge/C-Win32-blue" alt="C/Win32">
+  <img src="https://img.shields.io/badge/Windows-11-blue" alt="Windows 11">
+  <img src="https://img.shields.io/badge/License-GPLv3+-red" alt="License: GPLv3+">
+  <img src="https://img.shields.io/github/v/release/fernandoenzo/MonitorSwitcher" alt="GitHub Release">
+</p>
 
 A lightweight system tray utility for Windows 11 that lets you instantly switch between monitors, change resolution, refresh rate, and toggle HDR — all from a single menu.
 
@@ -12,6 +18,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 - [Usage](#usage)
   - [Tray Menu](#tray-menu)
   - [Global Hotkeys](#global-hotkeys)
+  - [Customizing Hotkeys](#customizing-hotkeys)
 - [How It Works](#how-it-works)
 - [Building from Source](#building-from-source)
 - [License](#license)
@@ -28,6 +35,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 - **One-click restore** — Return to your original multi-monitor layout at any time.
 - **Start with Windows** — Optional auto-start via the tray menu (writes to `HKCU\...\Run`, no admin required).
 - **Emergency hotkeys** — Global shortcuts work from any screen, even when the taskbar isn't visible.
+- **Customizable hotkeys** — Remap all keyboard shortcuts via a built-in dialog. Capture mode with live modifier preview. Individual hotkeys can be cleared (disabled). Monitor prefix modifiers are configurable via checkboxes.
 - **Automatic update checker** — Checks GitHub releases on startup for new versions. Silent if up-to-date; shows a balloon notification when an update is available. Manual check available via tray menu ("Check for updates").
 
 ## Usage
@@ -52,6 +60,7 @@ HDR: LG ULTRAGEAR [ON]
 Restore original config
 ───────────────────────────
 ✓ Hotkeys enabled
+    Customize...
 ✓ Start with Windows
 ───────────────────────────
 Check for updates (latest)
@@ -77,14 +86,27 @@ When multiple monitors are active (extend/clone mode):
 
 ### Global Hotkeys
 
-| Shortcut | Action |
+| Default Shortcut | Action |
 |---|---|
 | `Ctrl+Alt+M` | Open the tray menu at the mouse cursor (works from any screen) |
 | `Ctrl+Alt+R` | Restore the original display configuration |
 | `Ctrl+Alt+H` | Toggle HDR on/off for the primary monitor |
 | `Ctrl+Alt+1..9` | Switch directly to monitor (no confirmation dialog) |
 
+> All hotkeys can be remapped or individually disabled via **Customize...** in the tray menu. The monitor prefix (default: Ctrl+Alt) applies to keys 1 through 9.
+
 These hotkeys are essential when working with a single monitor — the tray icon may not be visible on a secondary screen, but the hotkeys always work. Use the "Hotkeys enabled" toggle in the menu to disable them if they conflict with other software.
+
+### Customizing Hotkeys
+
+Open the customization dialog from the tray menu: **Hotkeys enabled → Customize...**
+
+- **Capture mode** — Click the "Capture" button next to any hotkey, then press the desired key combination. Modifiers are shown in real time as you hold them (e.g., "Ctrl+Alt+..."). Press a non-modifier key to complete the capture. At least one modifier (Ctrl, Alt, Shift, or Win) is required.
+- **Conflict detection** — If the captured combination conflicts with another hotkey, you'll be prompted to choose a different one.
+- **Clear** — Click "Clear" to disable an individual hotkey without affecting the others.
+- **Monitor prefix** — The modifier combination for keys 1..9 is configured via checkboxes (Ctrl, Alt, Shift, Win). At least one must be checked.
+- **Reset to Defaults** — Restores all hotkeys to their original Ctrl+Alt combinations.
+- **Persistence** — Custom hotkey settings are stored in the Windows registry (`HKCU\Software\MonitorSwitcher`) and survive application restarts.
 
 ## How It Works
 
