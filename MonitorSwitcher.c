@@ -173,6 +173,9 @@ static int              g_originalTopologyCount = 0;
 /* Reentrancy guard — suppresses WM_DISPLAYCHANGE during our own changes */
 static BOOL             g_selfChanging         = FALSE;
 
+/* Guard to prevent multiple hotkey dialogs */
+static BOOL             g_hotkeyDialogOpen     = FALSE;
+
 /* Dynamic hotkeys */
 static BOOL             g_hotkeysEnabled      = TRUE;
 static int              g_hotkeyMonitorCount   = 0;
@@ -2725,7 +2728,11 @@ static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
  */
 static void ShowHotkeyDialog(void)
 {
+    if (g_hotkeyDialogOpen)
+        return;
+    g_hotkeyDialogOpen = TRUE;
     DialogBoxW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDD_HOTKEY_DIALOG), g_hwndMain, HotkeyDialogProc);
+    g_hotkeyDialogOpen = FALSE;
 }
 
 /* ─── Auto-Start ────────────────────────────────────────────────────── */
