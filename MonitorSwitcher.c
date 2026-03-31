@@ -342,24 +342,45 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                     L"Right-click the tray icon to customize.");
     } else if (g_hotkeysEnabled) {
         WCHAR msg[256];
-        WCHAR menuStr[32], restoreStr[32], hdrStr[32];
-        
-        HotkeyToString(g_hotkeyMenu.modifiers, g_hotkeyMenu.vk, menuStr, 32);
-        HotkeyToString(g_hotkeyRestore.modifiers, g_hotkeyRestore.vk, restoreStr, 32);
-        HotkeyToString(g_hotkeyHdr.modifiers, g_hotkeyHdr.vk, hdrStr, 32);
-        
-        /* Build prefix string for monitor hotkeys */
-        WCHAR prefixStr[32] = L"";
+        WCHAR line1[192] = L"";
+        WCHAR tmp[64];
+
+        /* Build first line with only enabled hotkeys */
+        if (g_hotkeyMenu.vk != 0) {
+            HotkeyToString(g_hotkeyMenu.modifiers, g_hotkeyMenu.vk, tmp, 64);
+            StringCchCatW(line1, 192, tmp);
+            StringCchCatW(line1, 192, L" = menu");
+        }
+        if (g_hotkeyRestore.vk != 0) {
+            HotkeyToString(g_hotkeyRestore.modifiers, g_hotkeyRestore.vk, tmp, 64);
+            if (line1[0] != L'\0') StringCchCatW(line1, 192, L"  |  ");
+            StringCchCatW(line1, 192, tmp);
+            StringCchCatW(line1, 192, L" = restore");
+        }
+        if (g_hotkeyHdr.vk != 0) {
+            HotkeyToString(g_hotkeyHdr.modifiers, g_hotkeyHdr.vk, tmp, 64);
+            if (line1[0] != L'\0') StringCchCatW(line1, 192, L"  |  ");
+            StringCchCatW(line1, 192, tmp);
+            StringCchCatW(line1, 192, L" = HDR");
+        }
+
+        /* Append monitor prefix line only if prefix is configured */
         if (g_hotkeyMonitorPrefix != 0) {
+            WCHAR prefixStr[32] = L"";
             if (g_hotkeyMonitorPrefix & MOD_CONTROL) StringCchCatW(prefixStr, 32, L"Ctrl+");
             if (g_hotkeyMonitorPrefix & MOD_ALT) StringCchCatW(prefixStr, 32, L"Alt+");
             if (g_hotkeyMonitorPrefix & MOD_SHIFT) StringCchCatW(prefixStr, 32, L"Shift+");
             if (g_hotkeyMonitorPrefix & MOD_WIN) StringCchCatW(prefixStr, 32, L"Win+");
+            if (line1[0] != L'\0')
+                StringCchPrintfW(msg, 256, L"%s\n%s1..9 = switch monitor", line1, prefixStr);
+            else
+                StringCchPrintfW(msg, 256, L"%s1..9 = switch monitor", prefixStr);
+        } else if (line1[0] != L'\0') {
+            StringCchCopyW(msg, 256, line1);
+        } else {
+            StringCchCopyW(msg, 256, L"All hotkeys are disabled.\nRight-click the tray icon to configure.");
         }
-        
-        StringCchPrintfW(msg, 256,
-            L"%s = menu  |  %s = restore  |  %s = HDR\n%s1..9 = switch directly to monitor",
-            menuStr, restoreStr, hdrStr, prefixStr);
+
         ShowBalloon(L"MonitorSwitcher", msg);
     } else {
         ShowBalloon(L"MonitorSwitcher",
