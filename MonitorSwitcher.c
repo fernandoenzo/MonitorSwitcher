@@ -2428,6 +2428,38 @@ static void CancelCapture(HWND hwnd)
 }
 
 /*
+ * Updates the edit control with a live preview of held modifier keys
+ * during hotkey capture. Shows "Ctrl+Alt+..." while modifiers are held,
+ * or reverts to "Press key combination..." when all are released.
+ */
+static void UpdateCapturePreview(HWND hwnd)
+{
+    if (g_captureTarget == 0)
+        return;
+
+    int editId = 0;
+    switch (g_captureTarget) {
+    case 1: editId = IDC_HOTKEY_MENU; break;
+    case 2: editId = IDC_HOTKEY_RESTORE; break;
+    case 3: editId = IDC_HOTKEY_HDR; break;
+    }
+
+    WCHAR preview[64] = L"";
+    if (GetKeyState(VK_CONTROL) & 0x8000) StringCchCatW(preview, 64, L"Ctrl+");
+    if (GetKeyState(VK_MENU) & 0x8000) StringCchCatW(preview, 64, L"Alt+");
+    if (GetKeyState(VK_SHIFT) & 0x8000) StringCchCatW(preview, 64, L"Shift+");
+    if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000))
+        StringCchCatW(preview, 64, L"Win+");
+
+    if (preview[0] != L'\0')
+        StringCchCatW(preview, 64, L"...");
+    else
+        StringCchCopyW(preview, 64, L"Press key combination...");
+
+    SetDlgItemTextW(hwnd, editId, preview);
+}
+
+/*
  * Dialog procedure for hotkey customization.
  */
 static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -2435,6 +2467,10 @@ static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     (void)lParam;
     switch (msg) {
     case WM_INITDIALOG:
+        /* Set dialog icon to match the application */
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_hIcon);
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_hIcon);
+
         /* Copy current config to dialog state */
         g_dialogHotkeyMenu = g_hotkeyMenu;
         g_dialogHotkeyRestore = g_hotkeyRestore;
@@ -2471,12 +2507,14 @@ static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         {
             UINT vk = (UINT)wParam;
             
-            /* Ignore modifier-only presses (both generic and left/right variants) */
+            /* Modifier-only press: show live preview and wait for final key */
             if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL ||
                 vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU ||
                 vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT ||
-                vk == VK_LWIN || vk == VK_RWIN)
-                break;
+                vk == VK_LWIN || vk == VK_RWIN) {
+                UpdateCapturePreview(hwnd);
+                return TRUE;
+            }
 
             /* Get current modifier state */
             UINT modifiers = 0;
@@ -2527,6 +2565,15 @@ static INT_PTR CALLBACK HotkeyDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             g_captureTarget = 0;
         }
         return TRUE;
+
+    case WM_KEYUP:
+    case WM_SYSKEYUP:
+        /* Update live preview when a modifier key is released */
+        if (g_captureTarget != 0) {
+            UpdateCapturePreview(hwnd);
+            return TRUE;
+        }
+        break;
 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
