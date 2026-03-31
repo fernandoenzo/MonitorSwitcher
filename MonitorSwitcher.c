@@ -212,12 +212,16 @@ static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 static DWORD WINAPI CheckUpdateThread(LPVOID);
 
 /* DisplayConfig helpers */
+static BOOL QueryDisplayPaths(DWORD flags, UINT32 *pathCount,
+                              UINT32 *modeCount);
 static int  GetAllMonitors(MonitorInfo *monitors, int maxMonitors);
 static BOOL GetActiveGdiName(WCHAR *gdiName, int maxLen);
 static BOOL GetCurrentMode(const WCHAR *gdiName,
                            UINT32 *w, UINT32 *h, UINT32 *freq);
 
 /* Exclusive mode */
+static BOOL MatchIdentity(MonitorIdentity a, MonitorIdentity b);
+static LONG ApplyTopology(UINT32 pathCount, DISPLAYCONFIG_PATH_INFO *paths);
 static void SaveConfig(void);
 static BOOL IsTopologyChanged(void);
 static void SetExclusiveMonitor(MonitorIdentity mon);
@@ -226,6 +230,8 @@ static void RestoreOriginal(void);
 static void ConfirmSwitch(MonitorIdentity mon);
 
 /* Resolution / refresh rate */
+static int  CompareResDesc(const void *a, const void *b);
+static int  CompareFreqDesc(const void *a, const void *b);
 static int  GetAvailableResolutions(const WCHAR *gdiName,
                                     ResolutionEntry *res, int maxRes);
 static int  GetAvailableFreqs(const WCHAR *gdiName,
@@ -621,6 +627,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam,
 /* ─── DisplayConfig Helpers ─────────────────────────────────────────── */
 
 /*
+ * Queries display paths and modes using the specified flags.
+ * Handles buffer sizing, clamping, zeroing, and the QueryDisplayConfig call.
+ * On success, *pathCount and *modeCount contain the actual counts.
+ * Returns TRUE on success, FALSE on failure.
+ */
+static BOOL QueryDisplayPaths(DWORD flags, UINT32 *pathCount, UINT32 *modeCount)
+{
+    UINT32 pc = 0, mc = 0;
+    if (GetDisplayConfigBufferSizes(flags, &pc, &mc) != ERROR_SUCCESS || pc == 0)
+        return FALSE;
+    if (pc > MAX_PATHS) pc = MAX_PATHS;
+    if (mc > MAX_MODES) mc = MAX_MODES;
+    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
+    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
+
+    if (QueryDisplayConfig(flags, &pc, g_pathBuf, &mc, g_modeBuf, NULL)
+            != ERROR_SUCCESS)
+        return FALSE;
+
+    *pathCount = pc;
+    *modeCount = mc;
+    return TRUE;
+}
+
+/*
  * Enumerates all physically connected monitors in a port-centric stable order.
  * Three-phase approach:
  *   Phase 1: QDC_ONLY_ACTIVE_PATHS — get current GDI name, resolution,
@@ -660,138 +691,120 @@ static int GetAllMonitors(MonitorInfo *monitors, int maxMonitors)
     UINT32 activeFreq[MAX_MONITORS];
     int    activeCnt = 0;
 
-    UINT32 apc = 0, amc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &apc, &amc)
-            == ERROR_SUCCESS && apc > 0) {
-        if (apc > MAX_PATHS) apc = MAX_PATHS;
-        if (amc > MAX_MODES) amc = MAX_MODES;
-        ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * apc);
-        ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * amc);
+    UINT32 apc, amc;
+    if (QueryDisplayPaths(QDC_ONLY_ACTIVE_PATHS, &apc, &amc)) {
+        UINT32 i;
+        for (i = 0; i < apc && activeCnt < MAX_MONITORS; i++) {
+            UINT32 tgtId = g_pathBuf[i].targetInfo.id;
 
-        if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
-                &apc, g_pathBuf, &amc, g_modeBuf, NULL) == ERROR_SUCCESS) {
-            UINT32 i;
-            for (i = 0; i < apc && activeCnt < MAX_MONITORS; i++) {
-                UINT32 tgtId = g_pathBuf[i].targetInfo.id;
-
-                /* Skip duplicates */
-                BOOL seen = FALSE;
-                int j;
-                for (j = 0; j < activeCnt; j++) {
-                    if (activeTgtIds[j] == tgtId) { seen = TRUE; break; }
-                }
-                if (seen) continue;
-
-                /* Resolve GDI name via DisplayConfigGetDeviceInfo type 1 */
-                DISPLAYCONFIG_SOURCE_DEVICE_NAME srcName;
-                ZeroMemory(&srcName, sizeof(srcName));
-                srcName.header.type =
-                    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
-                srcName.header.size = sizeof(srcName);
-                srcName.header.adapterId = g_pathBuf[i].sourceInfo.adapterId;
-                srcName.header.id = g_pathBuf[i].sourceInfo.id;
-
-                activeGdi[activeCnt][0] = L'\0';
-                if (DisplayConfigGetDeviceInfo(&srcName.header)
-                        == ERROR_SUCCESS) {
-                    lstrcpynW(activeGdi[activeCnt],
-                              srcName.viewGdiDeviceName, CCHDEVICENAME);
-                }
-
-                /* Get current resolution and refresh rate */
-                activeW[activeCnt] = 0;
-                activeH[activeCnt] = 0;
-                activeFreq[activeCnt] = 0;
-
-                if (activeGdi[activeCnt][0] != L'\0') {
-                    DEVMODEW dm;
-                    ZeroMemory(&dm, sizeof(dm));
-                    dm.dmSize = sizeof(dm);
-                    if (EnumDisplaySettingsExW(activeGdi[activeCnt],
-                            ENUM_CURRENT_SETTINGS, &dm, 0)) {
-                        activeW[activeCnt]    = dm.dmPelsWidth;
-                        activeH[activeCnt]    = dm.dmPelsHeight;
-                        activeFreq[activeCnt] = dm.dmDisplayFrequency;
-                    }
-                }
-
-                activeTgtIds[activeCnt] = tgtId;
-                activeCnt++;
+            /* Skip duplicates */
+            BOOL seen = FALSE;
+            int j;
+            for (j = 0; j < activeCnt; j++) {
+                if (activeTgtIds[j] == tgtId) { seen = TRUE; break; }
             }
+            if (seen) continue;
+
+            /* Resolve GDI name via DisplayConfigGetDeviceInfo type 1 */
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME srcName;
+            ZeroMemory(&srcName, sizeof(srcName));
+            srcName.header.type =
+                DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+            srcName.header.size = sizeof(srcName);
+            srcName.header.adapterId = g_pathBuf[i].sourceInfo.adapterId;
+            srcName.header.id = g_pathBuf[i].sourceInfo.id;
+
+            activeGdi[activeCnt][0] = L'\0';
+            if (DisplayConfigGetDeviceInfo(&srcName.header)
+                    == ERROR_SUCCESS) {
+                lstrcpynW(activeGdi[activeCnt],
+                          srcName.viewGdiDeviceName, CCHDEVICENAME);
+            }
+
+            /* Get current resolution and refresh rate */
+            activeW[activeCnt] = 0;
+            activeH[activeCnt] = 0;
+            activeFreq[activeCnt] = 0;
+
+            if (activeGdi[activeCnt][0] != L'\0') {
+                DEVMODEW dm;
+                ZeroMemory(&dm, sizeof(dm));
+                dm.dmSize = sizeof(dm);
+                if (EnumDisplaySettingsExW(activeGdi[activeCnt],
+                        ENUM_CURRENT_SETTINGS, &dm, 0)) {
+                    activeW[activeCnt]    = dm.dmPelsWidth;
+                    activeH[activeCnt]    = dm.dmPelsHeight;
+                    activeFreq[activeCnt] = dm.dmDisplayFrequency;
+                }
+            }
+
+            activeTgtIds[activeCnt] = tgtId;
+            activeCnt++;
         }
     }
 
     /* Phase 2: Enumerate all connected targets, filter ghosts */
-    UINT32 pc = 0, mc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ALL_PATHS, &pc, &mc)
-            == ERROR_SUCCESS && pc > 0) {
-        if (pc > MAX_PATHS) pc = MAX_PATHS;
-        if (mc > MAX_MODES) mc = MAX_MODES;
-        ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
-        ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
+    UINT32 pc, mc;
+    if (QueryDisplayPaths(QDC_ALL_PATHS, &pc, &mc)) {
+        UINT32 i;
+        for (i = 0; i < pc && count < maxMonitors; i++) {
+            UINT32 tgtId = g_pathBuf[i].targetInfo.id;
 
-        if (QueryDisplayConfig(QDC_ALL_PATHS,
-                &pc, g_pathBuf, &mc, g_modeBuf, NULL) == ERROR_SUCCESS) {
-            UINT32 i;
-            for (i = 0; i < pc && count < maxMonitors; i++) {
-                UINT32 tgtId = g_pathBuf[i].targetInfo.id;
-
-                /* Skip duplicates */
-                BOOL seen = FALSE;
-                int j;
-                for (j = 0; j < count; j++) {
-                    if (monitors[j].identity.targetId == tgtId) {
-                        seen = TRUE; break;
-                    }
+            /* Skip duplicates */
+            BOOL seen = FALSE;
+            int j;
+            for (j = 0; j < count; j++) {
+                if (monitors[j].identity.targetId == tgtId) {
+                    seen = TRUE; break;
                 }
-                if (seen) continue;
-
-                /* Resolve friendly name and device path via type 2 */
-                DISPLAYCONFIG_TARGET_DEVICE_NAME tgtName;
-                ZeroMemory(&tgtName, sizeof(tgtName));
-                tgtName.header.type =
-                    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
-                tgtName.header.size = sizeof(tgtName);
-                tgtName.header.adapterId =
-                    g_pathBuf[i].targetInfo.adapterId;
-                tgtName.header.id = tgtId;
-
-                if (DisplayConfigGetDeviceInfo(&tgtName.header)
-                        != ERROR_SUCCESS)
-                    continue;
-                
-                /* Filter ghost targets */
-                if (tgtName.monitorFriendlyDeviceName[0] == L'\0')
-                    continue;
-
-                MonitorInfo *mon = &monitors[count];
-                ZeroMemory(mon, sizeof(*mon));
-                mon->identity.targetId = tgtId;
-                lstrcpynW(mon->name,
-                          tgtName.monitorFriendlyDeviceName, 64);
-                lstrcpynW(mon->devPath,
-                          tgtName.monitorDevicePath, 128);
-                mon->identity.luidLow  =
-                    g_pathBuf[i].targetInfo.adapterId.LowPart;
-                mon->identity.luidHigh =
-                    (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
-
-                /* Cross-reference with active info from Phase 1 */
-                mon->isActive = FALSE;
-                for (j = 0; j < activeCnt; j++) {
-                    if (activeTgtIds[j] == tgtId) {
-                        mon->isActive = TRUE;
-                        lstrcpynW(mon->gdiName,
-                                  activeGdi[j], CCHDEVICENAME);
-                        mon->resolution.w = activeW[j];
-                        mon->resolution.h = activeH[j];
-                        mon->freq = activeFreq[j];
-                        break;
-                    }
-                }
-
-                count++;
             }
+            if (seen) continue;
+
+            /* Resolve friendly name and device path via type 2 */
+            DISPLAYCONFIG_TARGET_DEVICE_NAME tgtName;
+            ZeroMemory(&tgtName, sizeof(tgtName));
+            tgtName.header.type =
+                DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+            tgtName.header.size = sizeof(tgtName);
+            tgtName.header.adapterId =
+                g_pathBuf[i].targetInfo.adapterId;
+            tgtName.header.id = tgtId;
+
+            if (DisplayConfigGetDeviceInfo(&tgtName.header)
+                    != ERROR_SUCCESS)
+                continue;
+
+            /* Filter ghost targets */
+            if (tgtName.monitorFriendlyDeviceName[0] == L'\0')
+                continue;
+
+            MonitorInfo *mon = &monitors[count];
+            ZeroMemory(mon, sizeof(*mon));
+            mon->identity.targetId = tgtId;
+            lstrcpynW(mon->name,
+                      tgtName.monitorFriendlyDeviceName, 64);
+            lstrcpynW(mon->devPath,
+                      tgtName.monitorDevicePath, 128);
+            mon->identity.luidLow  =
+                g_pathBuf[i].targetInfo.adapterId.LowPart;
+            mon->identity.luidHigh =
+                (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart;
+
+            /* Cross-reference with active info from Phase 1 */
+            mon->isActive = FALSE;
+            for (j = 0; j < activeCnt; j++) {
+                if (activeTgtIds[j] == tgtId) {
+                    mon->isActive = TRUE;
+                    lstrcpynW(mon->gdiName,
+                              activeGdi[j], CCHDEVICENAME);
+                    mon->resolution.w = activeW[j];
+                    mon->resolution.h = activeH[j];
+                    mon->freq = activeFreq[j];
+                    break;
+                }
+            }
+
+            count++;
         }
     }
 
@@ -857,17 +870,8 @@ static BOOL IsTopologyChanged(void)
     if (g_originalTopologyCount == 0)
         return FALSE;
 
-    UINT32 pc = 0, mc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pc, &mc)
-            != ERROR_SUCCESS || pc == 0)
-        return FALSE;
-    if (pc > MAX_PATHS) pc = MAX_PATHS;
-    if (mc > MAX_MODES) mc = MAX_MODES;
-    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
-    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
-
-    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
-            &pc, g_pathBuf, &mc, g_modeBuf, NULL) != ERROR_SUCCESS)
+    UINT32 pc, mc;
+    if (!QueryDisplayPaths(QDC_ONLY_ACTIVE_PATHS, &pc, &mc))
         return FALSE;
 
     /* Different number of active paths = topology changed */
@@ -908,17 +912,8 @@ static void SaveConfig(void)
 {
     g_originalTopologyCount = 0;
 
-    UINT32 pc = 0, mc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pc, &mc)
-            != ERROR_SUCCESS || pc == 0)
-        return;
-    if (pc > MAX_PATHS) pc = MAX_PATHS;
-    if (mc > MAX_MODES) mc = MAX_MODES;
-    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
-    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
-
-    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
-            &pc, g_pathBuf, &mc, g_modeBuf, NULL) != ERROR_SUCCESS)
+    UINT32 pc, mc;
+    if (!QueryDisplayPaths(QDC_ONLY_ACTIVE_PATHS, &pc, &mc))
         return;
 
     UINT32 i;
@@ -936,6 +931,34 @@ static void SaveConfig(void)
 }
 
 /*
+ * Compares two MonitorIdentity structs for equality.
+ * Returns TRUE if all three fields match.
+ */
+static BOOL MatchIdentity(MonitorIdentity a, MonitorIdentity b)
+{
+    return a.targetId == b.targetId
+        && a.luidLow  == b.luidLow
+        && a.luidHigh == b.luidHigh;
+}
+
+/*
+ * Applies a display topology using the three-attempt strategy.
+ * Returns the result code from SetDisplayConfig.
+ */
+static LONG ApplyTopology(UINT32 pathCount, DISPLAYCONFIG_PATH_INFO *paths)
+{
+    LONG ret = SetDisplayConfig(pathCount, paths, 0, NULL,
+        SDC_APPLY | SDC_TOPOLOGY_SUPPLIED);
+    if (ret != ERROR_SUCCESS)
+        ret = SetDisplayConfig(pathCount, paths, 0, NULL,
+            SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG);
+    if (ret != ERROR_SUCCESS)
+        ret = SetDisplayConfig(pathCount, paths, 0, NULL,
+            SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES);
+    return ret;
+}
+
+/*
  * Activates ONLY the specified monitor (by targetId), disabling all others.
  *
  * Three-attempt strategy (avoids SDC_ALLOW_CHANGES which causes 60Hz fallback):
@@ -947,19 +970,8 @@ static void SetExclusiveMonitor(MonitorIdentity mon)
 {
     g_selfChanging = TRUE;
 
-    UINT32 pc = 0, mc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ALL_PATHS, &pc, &mc)
-            != ERROR_SUCCESS || pc == 0) {
-        g_selfChanging = FALSE;
-        return;
-    }
-    if (pc > MAX_PATHS) pc = MAX_PATHS;
-    if (mc > MAX_MODES) mc = MAX_MODES;
-    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
-    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
-
-    if (QueryDisplayConfig(QDC_ALL_PATHS,
-            &pc, g_pathBuf, &mc, g_modeBuf, NULL) != ERROR_SUCCESS) {
+    UINT32 pc, mc;
+    if (!QueryDisplayPaths(QDC_ALL_PATHS, &pc, &mc)) {
         g_selfChanging = FALSE;
         return;
     }
@@ -968,11 +980,12 @@ static void SetExclusiveMonitor(MonitorIdentity mon)
     UINT32 i;
     for (i = 0; i < pc; i++) {
         /* Match by both targetId and adapter LUID for unambiguous identification */
-        if (g_pathBuf[i].targetInfo.id != mon.targetId)
-            continue;
-        if (g_pathBuf[i].targetInfo.adapterId.LowPart != mon.luidLow)
-            continue;
-        if ((UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart != mon.luidHigh)
+        MonitorIdentity pathId = {
+            g_pathBuf[i].targetInfo.id,
+            g_pathBuf[i].targetInfo.adapterId.LowPart,
+            (UINT32)g_pathBuf[i].targetInfo.adapterId.HighPart
+        };
+        if (!MatchIdentity(pathId, mon))
             continue;
 
         /* Skip paths where the target is not available (ghost/unconnected) */
@@ -988,15 +1001,7 @@ static void SetExclusiveMonitor(MonitorIdentity mon)
             DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
 
         /* Three-attempt apply */
-        LONG ret = SetDisplayConfig(1, &singlePath, 0, NULL,
-            SDC_APPLY | SDC_TOPOLOGY_SUPPLIED);
-        if (ret != ERROR_SUCCESS)
-            ret = SetDisplayConfig(1, &singlePath, 0, NULL,
-                SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG);
-        if (ret != ERROR_SUCCESS)
-            ret = SetDisplayConfig(1, &singlePath, 0, NULL,
-                SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG
-                | SDC_ALLOW_CHANGES);
+        LONG ret = ApplyTopology(1, &singlePath);
 
         if (ret != ERROR_SUCCESS) {
             WCHAR errMsg[128];
@@ -1050,17 +1055,8 @@ static void SetExclusiveMonitor(MonitorIdentity mon)
  */
 static void SaveActiveConfigToDatabase(void)
 {
-    UINT32 pc = 0, mc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pc, &mc)
-            != ERROR_SUCCESS || pc == 0)
-        return;
-    if (pc > MAX_PATHS) pc = MAX_PATHS;
-    if (mc > MAX_MODES) mc = MAX_MODES;
-    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
-    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
-
-    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
-            &pc, g_pathBuf, &mc, g_modeBuf, NULL) != ERROR_SUCCESS)
+    UINT32 pc, mc;
+    if (!QueryDisplayPaths(QDC_ONLY_ACTIVE_PATHS, &pc, &mc))
         return;
 
     SetDisplayConfig(pc, g_pathBuf, mc, g_modeBuf,
@@ -1084,22 +1080,8 @@ static void RestoreOriginal(void)
     g_selfChanging = TRUE;
 
     /* Query fresh paths from the system */
-    UINT32 pc = 0, mc = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ALL_PATHS, &pc, &mc)
-            != ERROR_SUCCESS || pc == 0) {
-        g_selfChanging = FALSE;
-        MessageBoxW(NULL,
-            L"Restore failed: no display paths available.",
-            L"MonitorSwitcher", MB_OK | MB_ICONWARNING);
-        return;
-    }
-    if (pc > MAX_PATHS) pc = MAX_PATHS;
-    if (mc > MAX_MODES) mc = MAX_MODES;
-    ZeroMemory(g_pathBuf, sizeof(g_pathBuf[0]) * pc);
-    ZeroMemory(g_modeBuf, sizeof(g_modeBuf[0]) * mc);
-
-    if (QueryDisplayConfig(QDC_ALL_PATHS,
-            &pc, g_pathBuf, &mc, g_modeBuf, NULL) != ERROR_SUCCESS) {
+    UINT32 pc, mc;
+    if (!QueryDisplayPaths(QDC_ALL_PATHS, &pc, &mc)) {
         g_selfChanging = FALSE;
         MessageBoxW(NULL,
             L"Restore failed: could not query display config.",
@@ -1196,18 +1178,7 @@ static void RestoreOriginal(void)
     }
 
     /* Three-attempt apply (same strategy as SetExclusiveMonitor) */
-    LONG ret = SetDisplayConfig(
-        (UINT32)restoreCount, restorePaths, 0, NULL,
-        SDC_APPLY | SDC_TOPOLOGY_SUPPLIED);
-    if (ret != ERROR_SUCCESS)
-        ret = SetDisplayConfig(
-            (UINT32)restoreCount, restorePaths, 0, NULL,
-            SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG);
-    if (ret != ERROR_SUCCESS)
-        ret = SetDisplayConfig(
-            (UINT32)restoreCount, restorePaths, 0, NULL,
-            SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG
-            | SDC_ALLOW_CHANGES);
+    LONG ret = ApplyTopology((UINT32)restoreCount, restorePaths);
 
     g_selfChanging = FALSE;
 
@@ -1223,6 +1194,28 @@ static void RestoreOriginal(void)
 }
 
 /* ─── Resolution and Refresh Rate ───────────────────────────────────── */
+
+/* qsort comparator: ResolutionEntry by pixel count descending */
+static int CompareResDesc(const void *a, const void *b)
+{
+    const ResolutionEntry *ra = (const ResolutionEntry *)a;
+    const ResolutionEntry *rb = (const ResolutionEntry *)b;
+    UINT64 pa = (UINT64)ra->w * ra->h;
+    UINT64 pb = (UINT64)rb->w * rb->h;
+    if (pa > pb) return -1;
+    if (pa < pb) return  1;
+    return 0;
+}
+
+/* qsort comparator: UINT32 frequency descending */
+static int CompareFreqDesc(const void *a, const void *b)
+{
+    const UINT32 *fa = (const UINT32 *)a;
+    const UINT32 *fb = (const UINT32 *)b;
+    if (*fa > *fb) return -1;
+    if (*fa < *fb) return  1;
+    return 0;
+}
 
 /*
  * Enumerates all unique resolutions for a GDI device.
@@ -1258,19 +1251,9 @@ static int GetAvailableResolutions(const WCHAR *gdiName,
         modeIdx++;
     }
 
-    /* Bubble sort by pixel count descending */
-    int i, j;
-    for (i = 0; i < count - 1; i++) {
-        for (j = 0; j < count - 1 - i; j++) {
-            UINT64 a = (UINT64)res[j].w * res[j].h;
-            UINT64 b = (UINT64)res[j + 1].w * res[j + 1].h;
-            if (a < b) {
-                ResolutionEntry tmp = res[j];
-                res[j]     = res[j + 1];
-                res[j + 1] = tmp;
-            }
-        }
-    }
+    /* Sort by pixel count descending */
+    if (count > 1)
+        qsort(res, count, sizeof(ResolutionEntry), CompareResDesc);
 
     return count;
 }
@@ -1309,17 +1292,9 @@ static int GetAvailableFreqs(const WCHAR *gdiName,
         modeIdx++;
     }
 
-    /* Bubble sort descending */
-    int i, j;
-    for (i = 0; i < count - 1; i++) {
-        for (j = 0; j < count - 1 - i; j++) {
-            if (freqs[j] < freqs[j + 1]) {
-                UINT32 tmp = freqs[j];
-                freqs[j]     = freqs[j + 1];
-                freqs[j + 1] = tmp;
-            }
-        }
-    }
+    /* Sort descending */
+    if (count > 1)
+        qsort(freqs, count, sizeof(UINT32), CompareFreqDesc);
 
     return count;
 }
@@ -1560,9 +1535,7 @@ static void ToggleHdr(MonitorIdentity mon)
     MonitorInfo *fullInfo = NULL;
     int i;
     for (i = 0; i < monCount; i++) {
-        if (monitors[i].identity.targetId == mon.targetId
-            && monitors[i].identity.luidLow == mon.luidLow
-            && monitors[i].identity.luidHigh == mon.luidHigh) {
+        if (MatchIdentity(monitors[i].identity, mon)) {
             fullInfo = &monitors[i];
             break;
         }
@@ -1915,9 +1888,7 @@ static void ConfirmSwitch(MonitorIdentity mon)
     int i;
     for (i = 0; i < monCount; i++) {
         if (monitors[i].isActive) activeCount++;
-        if (monitors[i].identity.targetId == mon.targetId
-            && monitors[i].identity.luidLow == mon.luidLow
-            && monitors[i].identity.luidHigh == mon.luidHigh) {
+        if (MatchIdentity(monitors[i].identity, mon)) {
             lstrcpynW(name, monitors[i].name, 64);
             if (monitors[i].isActive) alreadyActive = TRUE;
         }
