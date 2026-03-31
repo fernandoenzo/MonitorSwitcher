@@ -80,7 +80,7 @@ When multiple monitors are active (extend/clone mode):
 - **Refresh Rate** — Submenu with available rates for the current resolution.
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
 - **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
-- **Hotkeys enabled** — Toggle to enable/disable all global hotkeys. When disabled, all Ctrl+Alt shortcuts are unregistered. Balloon notification confirms the toggle.
+- **Hotkeys enabled** — Toggle to enable/disable all global hotkeys. When disabled, all registered shortcuts are unregistered. Balloon notification confirms the toggle.
 - **Start with Windows** — Toggles auto-start at logon. When enabled, writes the executable path to the Windows Run registry key (`HKCU`).
 - **Check for updates** — Manually check for new versions on GitHub. Shows a balloon notification with the result. On startup, checks silently and only notifies if an update is available.
 
@@ -88,25 +88,33 @@ When multiple monitors are active (extend/clone mode):
 
 | Default Shortcut | Action |
 |---|---|
-| `Ctrl+Alt+M` | Open the tray menu at the mouse cursor (works from any screen) |
+| `Ctrl+Alt+M` | Open the tray menu at the mouse cursor |
 | `Ctrl+Alt+R` | Restore the original display configuration |
 | `Ctrl+Alt+H` | Toggle HDR on/off for the primary monitor |
-| `Ctrl+Alt+1..9` | Switch directly to monitor (no confirmation dialog) |
+| `Ctrl+Alt+1..9` | Switch directly to monitor |
 
-> All hotkeys can be remapped or individually disabled via **Customize...** in the tray menu. The monitor prefix (default: Ctrl+Alt) applies to keys 1 through 9.
+> **Note:** If a hotkey doesn't work, another program may have claimed it first (common with NVIDIA/AMD overlays). All hotkeys can be remapped or individually disabled via **Customize** in the tray menu.
 
-These hotkeys are essential when working with a single monitor — the tray icon may not be visible on a secondary screen, but the hotkeys always work. Use the "Hotkeys enabled" toggle in the menu to disable them if they conflict with other software.
+These hotkeys work from any screen and bypass confirmation dialogs — they're essential when the tray icon isn't visible, and invaluable when facing a black screen caused by an active virtual monitor or dummy plug.
 
 ### Customizing Hotkeys
 
-Open the customization dialog from the tray menu: **Hotkeys enabled → Customize...**
+Open the customization dialog from the tray menu: click **Customize...** under "Hotkeys enabled".
 
 - **Capture mode** — Click the "Capture" button next to any hotkey, then press the desired key combination. Modifiers are shown in real time as you hold them (e.g., "Ctrl+Alt+..."). Press a non-modifier key to complete the capture. At least one modifier (Ctrl, Alt, Shift, or Win) is required.
 - **Conflict detection** — If the captured combination conflicts with another hotkey, you'll be prompted to choose a different one.
 - **Clear** — Click "Clear" to disable an individual hotkey without affecting the others.
-- **Monitor prefix** — The modifier combination for keys 1..9 is configured via checkboxes (Ctrl, Alt, Shift, Win). At least one must be checked.
+- **Monitor prefix** — The modifier combination for keys 1..9 is configured via checkboxes (Ctrl, Alt, Shift, Win). At least one must be checked to enable the monitor hotkeys.
 - **Reset to Defaults** — Restores all hotkeys to their original Ctrl+Alt combinations.
 - **Persistence** — Custom hotkey settings are stored in the Windows registry (`HKCU\Software\MonitorSwitcher`) and survive application restarts.
+- **Capture failures** — If a key combination doesn't register, another application may have already reserved it. Common culprits include:
+  - NVIDIA GeForce Experience (Alt+Z overlay)
+  - AMD ReLive
+  - Steam overlay
+  - Discord push-to-talk or other bindings
+  - OBS hotkeys
+
+  If you're unsure which program is using a specific hotkey, try [Hotkey Detective](https://github.com/ITachiLab/hotkey-detective) to identify the culprit.
 
 ## How It Works
 
