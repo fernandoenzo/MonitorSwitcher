@@ -6,6 +6,7 @@
 - Switch between monitors exclusively (turn off all others)
 - Change resolution and refresh rate
 - Toggle HDR per active monitor (via menu) or primary monitor (via hotkey)
+- Customize all keyboard shortcuts via a built-in dialog
 - Restore original display configuration
 
 ## File Structure
@@ -15,6 +16,7 @@ MonitorSwitcher.c         # Native Win32 C implementation
 MonitorSwitcher.rc        # Windows resource script (embeds icon and manifest into the .exe)
 MonitorSwitcher.manifest  # Application manifest (Per-Monitor DPI awareness)
 MonitorSwitcher.ico       # Application icon (multi-resolution: 256, 48, 32, 16)
+MonitorSwitcher.svg       # SVG icon for README header
 Makefile                  # Cross-compilation with MinGW-w64 from Linux
 README.md                 # Full documentation
 AGENTS.md                 # AI agent coding guidelines
@@ -55,6 +57,11 @@ No automated test framework. Manual testing required:
 7. Test "Hotkeys enabled" toggle: verify hotkeys can be disabled/enabled and balloon notifications appear
 8. Test exit behavior: confirm restore prompt when topology differs from startup
 9. Test "Start with Windows" toggle: verify registry entry is created/removed in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+10. Test hotkey customization dialog: capture, clear, reset to defaults, save, cancel
+11. Test capture mode: real-time modifier preview, conflict detection, Escape cancellation
+12. Test hotkey persistence: verify custom hotkeys survive application restart
+13. Test single-instance dialog guard: opening Customize while dialog is already open
+14. Test monitor prefix checkboxes: Ctrl, Alt, Shift, Win combinations for 1..9 hotkeys
 
 ## Key Win32 APIs Used
 
@@ -75,6 +82,9 @@ No automated test framework. Manual testing required:
 
 ### Registry (Auto-Start)
 - `RegOpenKeyExW` / `RegQueryValueExW` / `RegSetValueExW` / `RegDeleteValueW` / `RegCloseKey` — read/write auto-start entry in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+
+### Registry (Hotkey Config)
+- `RegCreateKeyExW` / `RegSetValueExW` / `RegQueryValueExW` / `RegCloseKey` — read/write hotkey configuration in `HKCU\Software\MonitorSwitcher` (DWORD-packed modifier+VK pairs, prefix modifiers, enabled state)
 
 ### System Tray and UI
 - `Shell_NotifyIconW` — system tray icon, tooltip, and balloon notifications
@@ -97,6 +107,9 @@ No automated test framework. Manual testing required:
 - `g_originalTopology[]` — array of `TopologyEntry` structs with `MonitorIdentity identity` and `sourceId`, saved once at startup (primary first), never overwritten
 - `IsTopologyChanged()` — queries current active paths and compares against `g_originalTopology` to detect any topology change, regardless of origin (MonitorSwitcher, Windows Settings, etc.)
 - `g_selfChanging` — reentrancy guard suppressing WM_DISPLAYCHANGE during our own changes
+- `g_hotkeyDialogOpen` — single-instance guard preventing multiple hotkey dialogs
+- `g_captureTarget` — state machine for hotkey capture mode (0=idle, 1=menu, 2=restore, 3=HDR)
+- `g_dialogHotkeyMenuMod`, `g_dialogHotkeyMenuVk`, etc. — dialog-local hotkey state (committed to globals only on Save)
 - Menu lookup tables (`g_menuMonitors`, `g_menuResolutions`, `g_menuFreqs`, `g_menuHdr`) map menu item IDs to action parameters
 
 ### Menu Callback Pattern
@@ -105,6 +118,7 @@ WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
 - `IDM_RES_BASE` (2000+) — resolution entries
 - `IDM_FREQ_BASE` (3000+) — frequency values
 - `IDM_HDR_BASE` (4000+) — HDR monitor `MonitorIdentity` structs
+- `IDM_CUSTOMIZE_HOTKEYS` (5005) — opens hotkey customization dialog
 
 ### Monitor Enumeration (Three-Phase)
 1. **Phase 1:** `QDC_ONLY_ACTIVE_PATHS` — get current GDI name, resolution, frequency for active targets
@@ -115,10 +129,10 @@ WM_COMMAND with menu item ID ranges plus parallel static lookup arrays:
 Monitors are sorted by `{luidHigh, luidLow, targetId}` — this replicates the exact order shown in Windows Settings. The order is tied to the physical GPU port, not the monitor itself: swapping cables between two monitors swaps their numbers (same as Windows). This is deterministic and stable across topology changes.
 
 ### Dynamic Hotkeys (Ctrl+Alt+1..9)
-`UpdateMonitorHotkeys()` registers `Ctrl+Alt+1` through `Ctrl+Alt+9` based on the number of connected monitors (from `GetAllMonitors`). Called at startup and on every topology change (`TIMER_REBUILD`), as well as after `SetExclusiveMonitor`, `RestoreOriginal`, and before `ShowContextMenu`. Old hotkeys are unregistered before registering new ones. Hotkeys bypass the confirmation dialog and call `SetExclusiveMonitor` directly.
+`UpdateMonitorHotkeys()` registers `Ctrl+Alt+1` through `Ctrl+Alt+9` based on the number of connected monitors (from `GetAllMonitors`). Called at startup and on every topology change (`TIMER_REBUILD`), as well as after `SetExclusiveMonitor`, `RestoreOriginal`, and before `ShowContextMenu`. Old hotkeys are unregistered before registering new ones. Hotkeys bypass the confirmation dialog and call `SetExclusiveMonitor` directly. The prefix modifiers are configurable (default: Ctrl+Alt); the function is guarded by `g_hotkeyMonitorPrefix != 0` to skip registration when the prefix is cleared.
 
 ### Hotkey Toggle
-`g_hotkeysEnabled` controls whether hotkeys are registered. When toggled via `IDM_TOGGLE_HOTKEYS`, all hotkeys are unregistered first (`UnregisterHotkeys()`), then conditionally re-registered based on the new state. Balloon notifications provide immediate feedback to the user.
+`g_hotkeysEnabled` controls whether hotkeys are registered. When toggled via `IDM_TOGGLE_HOTKEYS`, all hotkeys are unregistered first (`UnregisterHotkeys()`), then conditionally re-registered based on the new state. The enabled state is persisted via `SaveHotkeyConfig()`. Balloon notifications provide immediate feedback to the user.
 
 ### Balloon Notifications
 `ShowBalloon()` cancels any pending balloon (sends empty `szInfo`) before displaying a new one, preventing balloon queuing when rapidly toggling features. A one-shot timer (`TIMER_CLOSE_BALLOON`, 3.5 seconds) automatically dismisses the balloon. Uses `NIIF_USER | NIIF_LARGE_ICON` with the application icon.
@@ -145,6 +159,28 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - Posts `WM_UPDATE_CHECK_DONE` to main window. State machine: `UPDATE_UNKNOWN` → `UPDATE_CHECKING` → `UPDATE_AVAILABLE` or `UPDATE_LATEST`.
 - Silent on startup (only notifies if update available). Manual check via menu item shows balloon regardless.
 - Cache prevention: `INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE` plus `Cache-Control: no-cache` header ensures fresh responses from GitHub.
+
+### Hotkey Customization Dialog
+- `HotkeyDialogProc` manages a modal dialog (`DialogBoxW`) for remapping all keyboard shortcuts.
+- `g_captureTarget` state machine: 0=idle, 1=capturing menu hotkey, 2=capturing restore hotkey, 3=capturing HDR hotkey. Controls which edit field receives the captured key combination.
+- `WM_SETFOCUS` handler returns TRUE during capture mode to prevent `DefDlgProc` from redirecting focus to a child control (required for `WM_KEYDOWN` to reach the dialog proc).
+- `UpdateCapturePreview()` provides real-time modifier feedback (e.g., "Ctrl+Alt+...") as the user holds modifier keys during capture.
+- `WM_KEYUP`/`WM_SYSKEYUP` handlers update the preview when modifiers are released.
+- Three-phase flow: capture → validate (modifier requirement, conflict check) → store in dialog-local variables.
+- Save-time conflict check in IDOK validates that no named hotkey collides with the monitor prefix range (Ctrl+Alt+1..9).
+- Dialog-local state (`g_dialogHotkey*` variables) is committed to globals only on Save, ensuring Cancel is side-effect-free.
+- `g_hotkeyDialogOpen` flag prevents multiple dialog instances.
+
+### Hotkey Configuration Persistence
+- Hotkey configuration is stored in `HKCU\Software\MonitorSwitcher` using DWORD-packed values (HIWORD=modifiers, LOWORD=virtual key code).
+- Five registry values: `Hotkey_Menu`, `Hotkey_Restore`, `Hotkey_HDR`, `Hotkey_MonitorPrefix`, `Hotkeys_Enabled`.
+- `LoadHotkeyConfig()` reads all values at startup with defaults matching the original Ctrl+Alt shortcuts.
+- `SaveHotkeyConfig()` writes all values, called on dialog Save and on hotkey enable/disable toggle.
+
+### Refactored Helpers
+- `QueryDisplayPaths(flags, &pathCount, &modeCount)` — encapsulates `GetDisplayConfigBufferSizes` + clamp + `ZeroMemory` + `QueryDisplayConfig` boilerplate (used by 7 call sites).
+- `ApplyTopology(pathCount, paths)` — encapsulates the three-attempt `SetDisplayConfig` strategy (used by `SetExclusiveMonitor` and `RestoreOriginal`).
+- `MatchIdentity(a, b)` — compares two `MonitorIdentity` structs for equality (used by `SetExclusiveMonitor`, `ToggleHdr`, `ConfirmSwitch`).
 
 ## Conventions
 
@@ -173,6 +209,11 @@ Both `SetExclusiveMonitor` and `RestoreOriginal` use three attempts to apply top
 - `TIMER_CLOSE_BALLOON` (3.5 seconds) auto-dismisses balloons. Without this, Windows controls the duration (5-25 seconds depending on accessibility settings).
 - The `-ladvapi32` linker flag is required for the registry APIs used by `ReadHdrFromRegistry` and the auto-start feature.
 - `WINVER` and `_WIN32_WINNT` must be defined as `0x0601` (Windows 7+) before `#include <windows.h>` for the DISPLAYCONFIG types to be available in MinGW-w64 headers.
+- `WM_SETFOCUS` must return TRUE during capture mode to prevent `DefDlgProc` from redirecting focus to a child control (required for `WM_KEYDOWN` to reach the dialog proc).
+- `IsDialogMessage` converts VK_ESCAPE to `WM_COMMAND(IDCANCEL)` before `WM_KEYDOWN`, so Escape is handled in the IDCANCEL case.
+- `MOD_NOREPEAT` on all `RegisterHotKey` calls prevents repeated `WM_HOTKEY` messages while keys are held.
+- `MAPVK_VK_TO_VSC_EX` provides correct scan codes for extended keys (e.g., right Ctrl/Alt, arrow keys).
+- Conditional `#ifndef` guards for `MOD_NOREPEAT` and `MAPVK_VK_TO_VSC_EX` ensure compatibility with older MinGW-w64 versions.
 
 ## Execution Protocol
 
