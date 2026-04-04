@@ -76,8 +76,8 @@ When multiple monitors are active (extend/clone mode):
 ```
 
 - **Monitor list** — Monitors are numbered (`1.`, `2.`, `3.`) corresponding to `Ctrl+Alt+1..9` hotkeys. Click a monitor to activate it exclusively (all others are turned off). Active monitors are marked with `★` (exclusive) or `☆` (extend/clone). Inactive monitors show `(off)`.
-- **Resolution** — Submenu with all available resolutions, sorted largest first. The active one is marked with `>>`.
-- **Refresh Rate** — Submenu with available rates for the current resolution.
+- **Resolution** — Submenu with all available resolutions, sorted largest first. The active one is marked with a checkmark (✓).
+- **Refresh Rate** — Submenu with available rates for the current resolution. The active one is marked with a checkmark (✓).
 - **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
 - **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
 - **Hotkeys enabled** — Toggle to enable/disable all global hotkeys. When disabled, all registered shortcuts are unregistered. Balloon notification confirms the toggle.

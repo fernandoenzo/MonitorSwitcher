@@ -1624,8 +1624,8 @@ static void ToggleHdrPrimary(void)
  * Menu layout (top to bottom):
  *   "MonitorSwitcher"               (disabled title)
  *   ────────────────
- *   " *  MonitorName  |  WxH @ FHz"  (active, multiple)
- *   ">>  MonitorName  |  WxH @ FHz"  (only active monitor)
+ *   "☆  MonitorName  |  WxH @ FHz"   (active, multiple)
+ *   "★  MonitorName  |  WxH @ FHz"   (only active monitor)
  *   "     MonitorName  (off)"         (inactive)
  *   ────────────────
  *   "Resolution  [WxH]"         ►   submenu
@@ -1726,18 +1726,16 @@ static void ShowContextMenu(void)
         for (i = 0; i < resCount && g_menuResCount < MAX_RESOLUTIONS;
              i++) {
             WCHAR label[64];
-            if (resList[i].w == curW && resList[i].h == curH)
-                wsprintfW(label, L">>  %ux%u",
-                          resList[i].w, resList[i].h);
-            else
-                wsprintfW(label, L"%ux%u",
-                          resList[i].w, resList[i].h);
+            wsprintfW(label, L"%ux%u", resList[i].w, resList[i].h);
 
             UINT menuId = IDM_RES_BASE + (UINT)g_menuResCount;
             g_menuResolutions[g_menuResCount] = resList[i];
             g_menuResCount++;
 
-            AppendMenuW(hResMenu, MF_STRING, menuId, label);
+            UINT resFlags = MF_STRING;
+            if (resList[i].w == curW && resList[i].h == curH)
+                resFlags |= MF_CHECKED;
+            AppendMenuW(hResMenu, resFlags, menuId, label);
         }
 
         WCHAR resLabel[64];
@@ -1755,16 +1753,16 @@ static void ShowContextMenu(void)
         for (i = 0; i < freqCount && g_menuFreqCount < MAX_FREQUENCIES;
              i++) {
             WCHAR label[32];
-            if (freqList[i] == curFreq)
-                wsprintfW(label, L">>  %uHz", freqList[i]);
-            else
-                wsprintfW(label, L"%uHz", freqList[i]);
+            wsprintfW(label, L"%uHz", freqList[i]);
 
             UINT menuId = IDM_FREQ_BASE + (UINT)g_menuFreqCount;
             g_menuFreqs[g_menuFreqCount] = freqList[i];
             g_menuFreqCount++;
 
-            AppendMenuW(hFreqMenu, MF_STRING, menuId, label);
+            UINT freqFlags = MF_STRING;
+            if (freqList[i] == curFreq)
+                freqFlags |= MF_CHECKED;
+            AppendMenuW(hFreqMenu, freqFlags, menuId, label);
         }
 
         WCHAR freqLabel[32];
