@@ -55,7 +55,7 @@ MonitorSwitcher 1.8.2
 ───────────────────────────
 Resolution   [1920x1080]  ►
 Refresh Rate [144Hz]      ►
-✓ HDR: LG ULTRAGEAR [ON]
+✓ HDR  [ON]
 ───────────────────────────
 Restore original config
 ───────────────────────────

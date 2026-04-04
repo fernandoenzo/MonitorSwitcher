@@ -1758,6 +1758,17 @@ static void ShowContextMenu(void)
         BOOL anyHdrShown = FALSE;
         g_menuHdrCount = 0;
 
+        /* Count active HDR-capable monitors for conditional label format */
+        int activeHdrCount = 0;
+        for (i = 0; i < monCount; i++) {
+            if (!monitors[i].isActive)
+                continue;
+            if (IsHdrSupported(monitors[i].identity.luidLow,
+                              monitors[i].identity.luidHigh,
+                              monitors[i].identity.targetId))
+                activeHdrCount++;
+        }
+
         for (i = 0; i < monCount; i++) {
             if (!monitors[i].isActive)
                 continue;
@@ -1774,9 +1785,14 @@ static void ShowContextMenu(void)
 
             WCHAR label[128];
             if (hdrFound) {
-                wsprintfW(label, L"HDR: %s  [%s]",
-                          monitors[i].name,
-                          hdrEnabled ? L"ON" : L"OFF");
+                if (activeHdrCount == 1) {
+                    wsprintfW(label, L"HDR  [%s]",
+                              hdrEnabled ? L"ON" : L"OFF");
+                } else {
+                    wsprintfW(label, L"HDR: %s  [%s]",
+                              monitors[i].name,
+                              hdrEnabled ? L"ON" : L"OFF");
+                }
                 UINT menuId = IDM_HDR_BASE + (UINT)g_menuHdrCount;
                 g_menuHdr[g_menuHdrCount].targetId = monitors[i].identity.targetId;
                 g_menuHdr[g_menuHdrCount].luidLow = monitors[i].identity.luidLow;
@@ -1787,8 +1803,12 @@ static void ShowContextMenu(void)
                     hdrFlags |= MF_CHECKED;
                 AppendMenuW(hMenu, hdrFlags, menuId, label);
             } else {
-                wsprintfW(label, L"HDR: %s  [unknown]",
-                          monitors[i].name);
+                if (activeHdrCount == 1) {
+                    wsprintfW(label, L"HDR  [unknown]");
+                } else {
+                    wsprintfW(label, L"HDR: %s  [unknown]",
+                              monitors[i].name);
+                }
                 AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, label);
             }
         }
