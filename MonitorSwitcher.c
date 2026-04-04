@@ -1621,22 +1621,6 @@ static void ToggleHdrPrimary(void)
 /*
  * Builds and shows the tray context menu from scratch with fresh data.
  *
- * Menu layout (top to bottom):
- *   "MonitorSwitcher"               (disabled title)
- *   ────────────────
- *   "☆  MonitorName  |  WxH @ FHz"   (active, multiple)
- *   "★  MonitorName  |  WxH @ FHz"   (only active monitor)
- *   "     MonitorName  (off)"         (inactive)
- *   ────────────────
- *   "Resolution  [WxH]"         ►   submenu
- *   "Refresh Rate  [FHz]"       ►   submenu
- *   "HDR: MonitorName  [ON/OFF]"    per active HDR monitor
- *   ────────────────
- *   "Restore original config"       (enabled when topology changed)
- *   ────────────────
- *   "Start with Windows"            (checked/unchecked toggle)
- *   "Exit"
- *
  * Menu item selections arrive as WM_COMMAND messages.  Lookup tables
  * (g_menuMonitors, g_menuResolutions, etc.) map IDs to parameters.
  */
@@ -1798,7 +1782,10 @@ static void ShowContextMenu(void)
                 g_menuHdr[g_menuHdrCount].luidLow = monitors[i].identity.luidLow;
                 g_menuHdr[g_menuHdrCount].luidHigh = monitors[i].identity.luidHigh;
                 g_menuHdrCount++;
-                AppendMenuW(hMenu, MF_STRING, menuId, label);
+                UINT hdrFlags = MF_STRING;
+                if (hdrEnabled)
+                    hdrFlags |= MF_CHECKED;
+                AppendMenuW(hMenu, hdrFlags, menuId, label);
             } else {
                 wsprintfW(label, L"HDR: %s  [unknown]",
                           monitors[i].name);

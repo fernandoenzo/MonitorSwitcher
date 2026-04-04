@@ -47,7 +47,7 @@ A lightweight system tray utility for Windows 11 that lets you instantly switch 
 3. Right-click the tray icon to access all features:
 
 ```
-MonitorSwitcher 1.7.1
+MonitorSwitcher 1.8.2
 ───────────────────────────
 ★  1. LG ULTRAGEAR  |  1920x1080 @ 144Hz
    2. LG Dummy Plug  (off)
@@ -55,7 +55,7 @@ MonitorSwitcher 1.7.1
 ───────────────────────────
 Resolution   [1920x1080]  ►
 Refresh Rate [144Hz]      ►
-HDR: LG ULTRAGEAR [ON]
+✓ HDR: LG ULTRAGEAR [ON]
 ───────────────────────────
 Restore original config
 ───────────────────────────
@@ -78,7 +78,7 @@ When multiple monitors are active (extend/clone mode):
 - **Monitor list** — Monitors are numbered (`1.`, `2.`, `3.`) corresponding to `Ctrl+Alt+1..9` hotkeys. Click a monitor to activate it exclusively (all others are turned off). Active monitors are marked with `★` (exclusive) or `☆` (extend/clone). Inactive monitors show `(off)`.
 - **Resolution** — Submenu with all available resolutions, sorted largest first. The active one is marked with a checkmark (✓).
 - **Refresh Rate** — Submenu with available rates for the current resolution. The active one is marked with a checkmark (✓).
-- **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). State is read from Windows registry.
+- **HDR** — Individual toggle per active HDR-capable monitor. Shows one line per monitor (e.g., `HDR: LG ULTRAGEAR [ON]`). When enabled, it is marked with a checkmark (✓). State is read from Windows registry.
 - **Restore** — Returns to the display layout saved at startup, whenever the current layout differs from the original.
 - **Hotkeys enabled** — Toggle to enable/disable all global hotkeys. When disabled, all registered shortcuts are unregistered. Balloon notification confirms the toggle.
 - **Start with Windows** — Toggles auto-start at logon. When enabled, writes the executable path to the Windows Run registry key (`HKCU`).
